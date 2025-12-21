@@ -1,0 +1,7 @@
+google-genai
+playwright
+pillow
+pypdf
+pydantic
+python-dotenv
+httpx
