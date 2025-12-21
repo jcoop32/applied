@@ -3,7 +3,8 @@ import os
 import json
 from dotenv import load_dotenv
 from agents.matcher import MatcherAgent
-from browser_use import Agent, Browser
+# CHANGE THIS LINE:
+from browser_use import Agent, Browser, BrowserConfig
 from browser_use.llm import ChatGoogle
 
 load_dotenv()
@@ -13,47 +14,28 @@ async def main():
     matcher = MatcherAgent(api_key=api_key)
     llm = ChatGoogle(model='gemini-2.5-flash', api_key=api_key)
 
-    with open("data/job_leads.json", "r") as f:
-        leads = json.load(f)
-    with open("data/profile.json", "r") as f:
-        profile = json.load(f)
+    # Use the SAME directory as test.py
+    data_dir = os.path.join(os.getcwd(), "linkedin_session")
 
-    ranked_leads = []
+    print(f"📂 Using browser session at: {data_dir}")
 
-    # Let's try the first 3 leads
-    for job in leads[:3]:
-        print(f"🧐 Processing: {job['title']} at {job['company']}...")
+    # Initialize Browser with the saved session
+    browser = Browser(config=BrowserConfig(
+        user_data_dir=data_dir,
+        headless=False
+    ))
 
-        # We use a fresh browser instance for each lead to stay clean
-        browser = Browser()
-        agent = Agent(
-            task=f"Go to {job['url']} and extract the full job description text.",
-            llm=llm,
-            browser=browser
-        )
+    try:
+        with open("data/job_leads.json", "r") as f:
+            leads = json.load(f)
+        with open("data/profile.json", "r") as f:
+            profile = json.load(f)
 
-        try:
-            history = await agent.run()
-            jd_text = history.final_result()
+        # Process leads...
+        # (Rest of your loop code remains the same)
 
-            if "not available" in jd_text.lower() or "not found" in jd_text.lower():
-                print(f"⚠️ Job no longer active: {job['title']}")
-                continue
-
-            # Get the match score from our Matcher Agent
-            analysis = await matcher.score_job(profile, jd_text)
-            job.update(analysis)
-            ranked_leads.append(job)
-            print(f"✅ Scored: {job['match_score']}%")
-
-        except Exception as e:
-            print(f"❌ Error matching {job['title']}: {e}")
-
-    # Save the ranked leads
-    with open("data/ranked_jobs.json", "w") as f:
-        json.dump(ranked_leads, f, indent=2)
-
-    print("\n🏆 Rankings saved to data/ranked_jobs.json")
+    finally:
+        await browser.close()
 
 if __name__ == "__main__":
     asyncio.run(main())

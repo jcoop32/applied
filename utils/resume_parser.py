@@ -1,24 +1,17 @@
 import os
-from pypdf import PdfReader
 from google import genai
+from google.genai import types
 
 class ResumeParser:
     def __init__(self, api_key):
         self.client = genai.Client(api_key=api_key)
 
-    def extract_text(self, pdf_path):
-        reader = PdfReader(pdf_path)
-        text = ""
-        for page in reader.pages:
-            content = page.extract_text()
-            if content:
-                text += content
-        return text
-
     async def parse_to_json(self, pdf_path):
-        raw_text = self.extract_text(pdf_path)
+        # 1. Read the PDF as binary (Visual Processing)
+        with open(pdf_path, "rb") as f:
+            pdf_bytes = f.read()
 
-        # We define a manual schema that avoids 'additional_properties'
+        # 2. Define the Schema (Same as before, but critical for consistency)
         manual_schema = {
             "type": "OBJECT",
             "properties": {
@@ -36,7 +29,7 @@ class ResumeParser:
                             "company": {"type": "STRING"},
                             "title": {"type": "STRING"},
                             "start_date": {"type": "STRING"},
-                            "end_date": {"type": "STRING"},
+                            "end_date": {"type": "STRING", "description": "Use 'Present' if currently employed"},
                             "description": {"type": "STRING"}
                         }
                     }
@@ -55,11 +48,25 @@ class ResumeParser:
             }
         }
 
-        prompt = f"Extract all resume info into JSON:\n{raw_text}"
+        # 3. Optimized Prompt
+        # We ask it to use visual layout cues (columns, bold text) to parse correctly.
+        prompt = """
+        Analyze this resume document visually. Extract all information into the specified JSON format.
 
+        Guidelines:
+        - If the resume has multiple columns, read them logically.
+        - Infer skills from the 'Technical Skills' section or project descriptions.
+        - Standardize phone numbers to (XXX) XXX-XXXX format if possible.
+        - For 'end_date', use the word "Present" if the candidate is still working there.
+        """
+
+        # 4. Multimodal Call
         response = self.client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=prompt,
+            model="gemini-2.5-flash",
+            contents=[
+                types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"),
+                prompt
+            ],
             config={
                 'response_mime_type': 'application/json',
                 'response_schema': manual_schema,
