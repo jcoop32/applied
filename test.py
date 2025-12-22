@@ -1,7 +1,7 @@
 import asyncio
 import os
 # CHANGE THIS LINE: Import BrowserConfig from the top level
-from browser_use import Agent, Browser, BrowserConfig
+from browser_use import Agent, Browser
 from browser_use.llm import ChatGoogle
 from dotenv import load_dotenv
 
@@ -11,16 +11,8 @@ async def main():
     # Define where cookies will be stored
     data_dir = os.path.join(os.getcwd(), "linkedin_session")
 
-    # Configure the browser to use the persistent session
-    # We pass the chrome_instance_path if needed, but mainly we want the user_data_dir
-    # Note: If 'user_data_dir' is not a parameter in your version's BrowserConfig,
-    # you can try passing it via 'args' or using 'cookies_file' for simple persistence.
-    browser = Browser(config=BrowserConfig(
-        headless=False,
-        # Some versions use 'user_data_dir', others might require args.
-        # If this fails, try: args=[f"--user-data-dir={data_dir}"]
-        user_data_dir=data_dir
-    ))
+    # Configure the browser
+    browser = Browser()
 
     llm = ChatGoogle(model='gemini-2.5-flash', api_key=os.getenv("GEMINI_API_KEY"))
 
@@ -41,7 +33,10 @@ async def main():
     await agent.run()
 
     # Close explicitly to ensure cookies flush to disk
-    await browser.close()
+    try:
+        await browser.close()
+    except AttributeError:
+        pass
 
 if __name__ == "__main__":
     asyncio.run(main())

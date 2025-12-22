@@ -1,178 +1,174 @@
 import json
 import asyncio
+import urllib.parse
 import re
+import math
+from typing import List, Set, Dict, Any, Tuple
 from google import genai
-from google.genai.types import Tool, GenerateContentConfig, GoogleSearch
+from browser_use import Agent, Browser
+from browser_use.llm import ChatGoogle
 
 class ResearcherAgent:
-    def __init__(self, api_key):
+    def __init__(self, api_key: str):
         self.client = genai.Client(api_key=api_key)
-        self.model_id = "gemini-2.0-flash"
+        self.api_key = api_key
+        self.model_id = 'gemini-2.5-flash'
+        # We instantiate the LLM here, but Browser is managed per-task
+        self.llm = ChatGoogle(model='gemini-2.5-flash', api_key=api_key)
+        self.seen_jobs: Set[str] = set() # Hash set for deduplication
 
-    async def gather_leads(self, profile_data, target_count=10):
-        print(f"🧠 Researcher Agent started. Target: {target_count} jobs...")
+    async def generate_strategy(self, profile: dict) -> List[str]:
+        """
+        Analyzes the resume to generate a list of targeted search queries.
+        Returns a list of strings like "Software Engineer" or "React Developer".
+        """
+        print("🧠 Researcher: Generating Search Strategy from profile...")
 
-        # 1. STRATEGY PHASE (Restored the prompt you liked)
-        strategy_prompt = f"""
-        Act as an expert Technical Recruiter. Analyze this candidate profile:
-        {json.dumps(profile_data, indent=2)}
+        # Simple fallback if profile is empty
+        if not profile:
+            return ["Software Engineer"]
+
+        prompt = f"""
+        Act as an expert Recruiter for ANY industry (Tech, Finance, Healthcare, Arts, etc.).
+        Analyze this candidate profile:
+        {json.dumps(profile, indent=2)}
 
         Task:
-        1. Determine the candidate's exact Seniority Level.
-        2. Generate 4-5 specific Google Search Queries to find DIRECT job application pages.
+        1. Identify the candidate's **Primary Industry** and **Experience Level** (Intern, Entry Level, Junior, Mid-Level, Senior, Exec).
+        2. Identify standard job titles for *their* specific level in *their* field.
+        3. Generate 8 distinct search queries.
+        4. **CRITICAL**: Generate CORE job titles strictly.
+           - **REMOVE seniority terms**: Do NOT include words like "Junior", "Senior", "Entry Level", "Lead", "Manager" in the query.
+           - **BAD**: "Junior Software Engineer", "Senior Marketing Manager"
+           - **GOOD**: "Software Engineer", "Marketing Manager", "Account Executive"
+           - We want to see ALL jobs for this role; the agent will filter them later.
+           - Keep queries BROAD (max 2-4 words).
+           - **CRITICAL**: Double check spelling of all terms (e.g. 'Engineer', not 'Engiineer'). Ensure professional accuracy.
 
-        CRITICAL RULES:
-        - Use boolean operators: site:greenhouse.io OR site:lever.co OR site:workday.com
-        - Focus on: Job Title + Location + "Apply"
-        - Example: "Senior Python Developer" (site:greenhouse.io OR site:lever.co) "Chicago"
-
-        Output ONLY the list of queries.
+        Output ONLY a JSON list of strings (the queries).
         """
 
-        strategy_resp = self.client.models.generate_content(
-            model=self.model_id,
-            contents=strategy_prompt
-        )
-        print(f"📝 Search Strategy:\n{strategy_resp.text}\n")
-
-        # --- STEP 2: SEARCH LOOP ---
-        found_leads = {}
-        attempts = 0
-
-        while len(found_leads) < target_count and attempts < 6:
-            attempts += 1
-            needed = target_count - len(found_leads)
-            print(f"🔎 Round {attempts}: Hunting for {needed} links...")
-
-            search_prompt = f"""
-            Refer to this strategy:
-            {strategy_resp.text}
-
-            Execute a new Google Search to find {needed} NEW, ACTIVE job postings.
-
-            CRITICAL INSTRUCTION:
-            After searching, you MUST **list the Direct URLs** found in the search results explicitly in your text response.
-            Do not hide them in markdown links. Write the raw URL (e.g., https://boards.greenhouse.io/...).
-            """
-
+        try:
             response = self.client.models.generate_content(
                 model=self.model_id,
-                contents=search_prompt,
-                config=GenerateContentConfig(
-                    tools=[Tool(google_search=GoogleSearch())],
-                    response_mime_type="text/plain"
-                )
+                contents=prompt,
+                config={'response_mime_type': 'application/json'}
             )
+            queries = json.loads(response.text)
 
-            # --- STEP 3: LINK EXTRACTION (Clean Links Only) ---
-            potential_links = set()
+            # Clean queries just in case
+            cleaned_queries = []
+            for q in queries:
+                # Remove special chars like (), "", OR, AND
+                clean = re.sub(r'[()\"\'\[\]]', '', q)
+                clean = clean.replace(' OR ', ' ').replace(' AND ', ' ')
+                cleaned_queries.append(clean.strip())
+            return cleaned_queries
 
-            # A. Metadata Extraction (Filtered)
-            raw_meta_links = self._extract_links_from_grounding(response)
-            for link in raw_meta_links:
-                if "vertexaisearch" not in link and "google.com" not in link:
-                    potential_links.add(link)
+        except Exception as e:
+            print(f"⚠️ Strategy Generation Error: {e}")
+            return ["Entry Level Job", "Remote Job"]
 
-            # B. Regex Extraction (The Primary Source now)
-            # We explicitly asked the model to write the URLs, so regex should catch them.
-            text_links = re.findall(r'https?://[^\s)"]+', response.text)
-            for link in text_links:
-                clean_link = link.rstrip('.').rstrip(',').rstrip(';').rstrip(')').rstrip(']')
-                # Filter out the junk redirects here too
-                if "vertexaisearch" not in clean_link and "google.com" not in clean_link:
-                    potential_links.add(clean_link)
+    async def gather_leads(self, profile: dict, limit: int = 100) -> List[Dict[str, Any]]:
+        """
+        Raw Scraper: Finds as many jobs as possible for the Matcher to score.
+        Does NOT verify or filter (that is the Matcher's job).
+        """
+        queries = await self.generate_strategy(profile)
+        location = profile.get('location', 'Remote')
 
-            print(f"   - Clean links found: {len(potential_links)}")
-            if len(potential_links) > 0:
-                print(f"     Sample: {list(potential_links)[:2]}")
+        all_leads = []
+        # We want broad coverage, so we don't strictly limit per query.
+        # But we don't want to spend forever on one query if we have 8 queries.
+        # Let's say we want ~15 raw leads per query to hit the total goal.
+        max_per_query = math.ceil(limit / len(queries)) * 2 # Buffer
 
-            if not potential_links:
-                print("   ⚠️ No clean links found. Retrying...")
-                continue
+        for query in queries:
+            if len(all_leads) >= limit:
+                break
 
-            # --- STEP 4: VALIDATION ---
-            validation_prompt = f"""
-            I have a list of raw URLs. Select the ones that are likely **Job Postings**.
+            print(f"\n🔎 Searching: '{query}' in '{location}'")
 
-            SEARCH STRATEGY:
-            {strategy_resp.text}
+            query_leads_count = 0
 
-            RAW URLS:
-            {json.dumps(list(potential_links), indent=2)}
+            # Pagination Loop: Try up to 5 pages
+            for page in range(1, 6):
+                if query_leads_count >= max_per_query:
+                    print(f"   ✋ Reached reasonable depth for query '{query}'. Next.")
+                    break
 
-            INSTRUCTIONS:
-            - Select ANY URL that looks like a direct job description or application page.
-            - **BE PERMISSIVE:** If it is a greenhouse.io, lever.co, or workday link, ALWAYS accept it.
-            - IGNORE general "Careers" home pages.
+                if len(all_leads) >= limit:
+                    break
 
-            Return a JSON list.
-            Format: [{{"title": "Infer from URL/Context", "company": "Infer from URL", "url": "THE_EXACT_URL"}}]
-            """
+                # 1. Construct URL
+                encoded_q = urllib.parse.quote(query)
+                encoded_l = urllib.parse.quote(location)
+                url = f"https://www.getwork.com/search?q={encoded_q}&w={encoded_l}&page={page}"
+                print(f"   Using URL (Page {page}): {url}")
 
-            batch_leads = []
-            try:
-                json_resp = self.client.models.generate_content(
-                    model=self.model_id,
-                    contents=validation_prompt
+                # 2. Browser Task
+                task = (
+                    f"1. Navigate to {url}\n"
+                    f"2. Scroll down 3 times. Wait 2 seconds between scrolls.\n"
+                    f"3. Look for the main list of job cards.\n"
+                    f"4. CHECK for a 'Next' button.\n"
+                    f"5. ITERATE through the job cards found.\n"
+                    f"7. **CRITICAL**: IGNORE items marked as 'Sponsored', 'Ad'.\n"
+                    f"8. If NO jobs are found, return exactly `{{ 'jobs': [], 'has_next_page': false }}`.\n"
+                    f"9. Return: {{'jobs': [list of {{'title': str, 'company': str, 'url': str, 'snippet': str}}], 'has_next_page': bool}}"
                 )
 
-                cleaned_json = self._clean_json_string(json_resp.text)
-                batch_leads = json.loads(cleaned_json)
-                print(f"   - Validator accepted: {len(batch_leads)} links")
+                browser = Browser(headless=True)
+                try:
+                    agent = Agent(task=task, llm=self.llm, browser=browser)
+                    history = await agent.run()
+                    raw_result = history.final_result()
 
-            except Exception as e:
-                print(f"   ⚠️ Validator Issue: {e}. Switching to Manual Rescue.")
-                batch_leads = []
+                    if not raw_result:
+                        break
 
-            # --- STEP 5: SAFETY NET (Manual Rescue) ---
-            if not batch_leads and len(potential_links) > 0:
-                print("   🛡️ Engaging Safety Net...")
-                ats_domains = ["greenhouse.io", "lever.co", "workday", "ashby", "breezy.hr", "smartrecruiters", "jobvite", "icims"]
-                url_keywords = ["/jobs/", "/careers/", "/position/", "/apply", "view-job", "job-detail"]
+                    try:
+                        clean_result = raw_result.replace('```json', '').replace('```', '').strip()
+                        data = json.loads(clean_result)
+                        if isinstance(data, list):
+                            batch_leads = data
+                            has_next_page = False
+                        else:
+                            batch_leads = data.get('jobs', [])
+                            has_next_page = data.get('has_next_page', False)
+                    except Exception:
+                        break
 
-                for url in potential_links:
-                    url_lower = url.lower()
-                    is_ats = any(d in url_lower for d in ats_domains)
-                    is_job_pattern = any(k in url_lower for k in url_keywords)
+                    if not batch_leads:
+                        break
 
-                    if (is_ats or is_job_pattern) and len(url) > 25:
-                         batch_leads.append({
-                             "title": "Detected by Safety Net",
-                             "company": "Unknown",
-                             "url": url
-                         })
-                         print(f"     -> Rescued: {url}")
+                    print(f"   Found {len(batch_leads)} raw items.")
 
-            # Add to main list
-            for job in batch_leads:
-                url = job.get('url', '').strip()
-                if len(url) < 15: continue
+                    for lead in batch_leads:
+                        # DEDUPLICATE RAW
+                        title = lead.get('title', 'Unknown').strip()
+                        company = lead.get('company', 'Unknown').strip()
+                        signature = f"{company.lower()}|{title.lower()}"
 
-                if url and url not in found_leads:
-                    found_leads[url] = job
-                    print(f"   + Added: {job.get('company', 'Job')} - {job.get('title', 'Unknown')}")
+                        if signature in self.seen_jobs:
+                            continue
 
-            await asyncio.sleep(2)
+                        lead['query_source'] = query
+                        all_leads.append(lead)
+                        self.seen_jobs.add(signature)
+                        query_leads_count += 1
 
-        return list(found_leads.values())
+                    if not has_next_page:
+                        break
 
-    def _extract_links_from_grounding(self, response):
-        """Extracts verified URLs from the Google Search metadata."""
-        links = set()
-        try:
-            for candidate in response.candidates:
-                if candidate.grounding_metadata and candidate.grounding_metadata.grounding_chunks:
-                    for chunk in candidate.grounding_metadata.grounding_chunks:
-                        if chunk.web and chunk.web.uri:
-                            links.add(chunk.web.uri)
-        except Exception:
-            pass
-        return list(links)
+                except Exception as e:
+                    print(f"   ❌ Error: {e}")
+                finally:
+                    try:
+                        await browser.close()
+                    except:
+                        pass
 
-    def _clean_json_string(self, json_str):
-        if not json_str: return "[]"
-        cleaned = re.sub(r'^```json\s*', '', json_str, flags=re.MULTILINE)
-        cleaned = re.sub(r'^```\s*', '', cleaned, flags=re.MULTILINE)
-        cleaned = cleaned.strip()
-        if not cleaned: return "[]"
-        return cleaned
+                await asyncio.sleep(1)
+
+        return all_leads

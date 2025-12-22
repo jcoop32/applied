@@ -4,7 +4,7 @@ import json
 from dotenv import load_dotenv
 from agents.matcher import MatcherAgent
 # CHANGE THIS LINE:
-from browser_use import Agent, Browser, BrowserConfig
+from browser_use import Agent, Browser
 from browser_use.llm import ChatGoogle
 
 load_dotenv()
@@ -20,10 +20,7 @@ async def main():
     print(f"📂 Using browser session at: {data_dir}")
 
     # Initialize Browser with the saved session
-    browser = Browser(config=BrowserConfig(
-        user_data_dir=data_dir,
-        headless=False
-    ))
+    browser = Browser()
 
     try:
         with open("data/job_leads.json", "r") as f:
@@ -35,7 +32,10 @@ async def main():
         # (Rest of your loop code remains the same)
 
     finally:
-        await browser.close()
+        try:
+            await browser.close()
+        except:
+            pass
 
 if __name__ == "__main__":
     asyncio.run(main())
