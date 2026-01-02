@@ -1,43 +1,52 @@
-import asyncio
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 import os
-import json
-from dotenv import load_dotenv
-from browser_use import Browser
-from utils.resume_parser import ResumeParser
-from agents.matcher import MatcherAgent
-from agents.researcher import ResearcherAgent
 
-load_dotenv()
+# Import routers
+from app.api.uploads import router as uploads_router
+from app.api.auth import router as auth_router
+from app.api.profile import router as profile_router
 
-async def main():
-    api_key = os.getenv("GEMINI_API_KEY")
+app = FastAPI(title="Applied Agent UI", description="UI for Resume Management and Agent Control")
 
-    # 1. Parse Resume
-    parser = ResumeParser(api_key=api_key)
-    # Assumes your resume is in data/resume.pdf
-    print("📄 Parsing Resume...")
-    profile_json = await parser.parse_to_json("data/jc-resume-2025.pdf")
-    profile = json.loads(profile_json)
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-    try:
-        # 3. Researcher: Gather RAW Leads (High limit to ensure we find enough for the Matcher)
-        researcher = ResearcherAgent(api_key=api_key)
-        # We ask for ~60 raw items to ensure we find 10 good ones
-        raw_leads = await researcher.gather_leads(profile, limit=60)
+# Include API Routers
+app.include_router(auth_router, prefix="/api/auth", tags=["Auth"])
+app.include_router(uploads_router, prefix="/api", tags=["Uploads"])
+app.include_router(profile_router, prefix="/api/profile", tags=["Profile"])
 
-        print(f"👀 Researcher found {len(raw_leads)} raw leads. Sending to Matcher...")
+# Mount Static Files
+static_dir = os.path.join(os.path.dirname(__file__), "static")
+if not os.path.exists(static_dir):
+    os.makedirs(static_dir)
 
-        # 4. Matcher: Filter & Score (Limit to 10 verified)
-        matcher = MatcherAgent(api_key=api_key)
-        leads = await matcher.filter_and_score_leads(raw_leads, profile, limit=10)
+# Explicit route for Login
+@app.get("/login")
+async def login_page():
+    return FileResponse(os.path.join(static_dir, "login.html"))
 
-        with open("data/verified_leads.json", "w") as f:
-            json.dump(leads, f, indent=2)
+# Explicit route for Index
+@app.get("/")
+async def index_page():
+    return FileResponse(os.path.join(static_dir, "index.html"))
 
-        print(f"🏁 Done! Found {len(leads)} diversified jobs. Saved to data/verified_leads.json")
+# Explicit route for Profile
+@app.get("/profile")
+async def profile_page():
+    return FileResponse(os.path.join(static_dir, "profile.html"))
 
-    finally:
-        pass
+app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

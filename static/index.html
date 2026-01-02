@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Applied Agent - Resume Hub</title>
+    <link rel="stylesheet" href="/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="background-blobs">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+        <div class="blob blob-3"></div>
+    </div>
+
+    <div class="main-container glass-panel">
+        <header>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="text-align: center; flex-grow: 1;">
+                    <h1>Applied Agent</h1>
+                    <h2>Resume Hub</h2>
+                </div>
+                <div style="display: flex; gap: 10px;">
+                     <a href="/profile" style="background: rgba(255,255,255,0.2); color: white; padding: 8px 16px; border-radius: 8px; text-decoration: none; display: inline-block;">My Profile</a>
+                     <button id="logout-btn" style="background: rgba(255,255,255,0.1); border: none; color: white; padding: 8px 16px; border-radius: 8px; cursor: pointer; transition: background 0.2s;">Logout</button>
+                </div>
+            </div>
+        </header>
+
+        <section class="upload-section">
+            <div id="drop-zone" class="drop-zone glass-panel-light">
+                <div class="icon">📄</div>
+                <h3>Drag & Drop Resume</h3>
+                <p>or click to browse (PDF, DOCX)</p>
+                <input type="file" id="file-input" hidden accept=".pdf,.doc,.docx">
+                <div id="upload-status" class="status-text"></div>
+            </div>
+        </section>
+
+        <section class="list-section">
+            <h3>Available Resumes</h3>
+            <div id="resume-list" class="resume-list">
+                <!-- Resume items will be injected here -->
+                <div class="loading-spinner">Loading...</div>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        // Auth Check
+        const token = localStorage.getItem('token');
+        if (!token) {
+            window.location.href = '/login';
+        }
+
+        document.getElementById('logout-btn').addEventListener('click', () => {
+            localStorage.removeItem('token');
+            window.location.href = '/login';
+        });
+    </script>
+    <script src="/script.js"></script>
+</body>
+</html>

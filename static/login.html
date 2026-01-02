@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Applied Agent - Login</title>
+    <link rel="stylesheet" href="/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        .form-container {
+            width: 100%;
+            max-width: 400px;
+            margin: 0 auto;
+        }
+        .form-group {
+            margin-bottom: 20px;
+            text-align: left;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+        input {
+            width: 100%;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid var(--glass-border);
+            background: rgba(0,0,0,0.2);
+            color: var(--text-primary);
+            outline: none;
+            transition: all 0.2s;
+        }
+        input:focus {
+            border-color: var(--accent);
+            background: rgba(129, 140, 248, 0.1);
+        }
+        .btn {
+            width: 100%;
+            padding: 12px;
+            border-radius: 8px;
+            border: none;
+            background: var(--accent);
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 10px;
+        }
+        .btn:hover {
+            opacity: 0.9;
+        }
+        .toggle-link {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+        .toggle-link span {
+            color: var(--accent);
+            cursor: pointer;
+            text-decoration: underline;
+        }
+        #error-msg {
+            color: #f87171;
+            text-align: center;
+            margin-bottom: 15px;
+            font-size: 0.9rem;
+            min-height: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="background-blobs">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+        <div class="blob blob-3"></div>
+    </div>
+
+    <div class="main-container glass-panel">
+        <header>
+            <h1>Applied Agent</h1>
+            <h2>Welcome</h2>
+        </header>
+
+        <section class="form-container">
+            <h3 id="form-title" style="text-align: center; margin-bottom: 20px;">Login</h3>
+
+            <div id="error-msg"></div>
+
+            <form id="auth-form">
+                <div class="form-group" id="name-group" style="display: none;">
+                    <label>Full Name</label>
+                    <input type="text" id="full_name" placeholder="John Doe">
+                </div>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="email" required placeholder="you@example.com">
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="password" required placeholder="••••••••">
+                </div>
+                <button type="submit" class="btn" id="submit-btn">Login</button>
+            </form>
+
+            <div class="toggle-link">
+                <p id="toggle-text">Don't have an account? <span id="toggle-btn">Sign Up</span></p>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        const form = document.getElementById('auth-form');
+        const emailInput = document.getElementById('email');
+        const passwordInput = document.getElementById('password');
+        const nameInput = document.getElementById('full_name');
+        const nameGroup = document.getElementById('name-group');
+        const submitBtn = document.getElementById('submit-btn');
+        const toggleBtn = document.getElementById('toggle-btn');
+        const formTitle = document.getElementById('form-title');
+        const toggleText = document.getElementById('toggle-text');
+        const errorMsg = document.getElementById('error-msg');
+
+        let isLogin = true;
+
+        toggleBtn.addEventListener('click', () => {
+            isLogin = !isLogin;
+            if (isLogin) {
+                formTitle.textContent = 'Login';
+                submitBtn.textContent = 'Login';
+                nameGroup.style.display = 'none';
+                toggleText.innerHTML = `Don't have an account? <span id="toggle-btn">Sign Up</span>`;
+            } else {
+                formTitle.textContent = 'Create Account';
+                submitBtn.textContent = 'Sign Up';
+                nameGroup.style.display = 'block';
+                toggleText.innerHTML = `Already have an account? <span id="toggle-btn">Login</span>`;
+            }
+            // Re-attach listener to new span
+            document.getElementById('toggle-btn').addEventListener('click', () => toggleBtn.click());
+            errorMsg.textContent = '';
+        });
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            errorMsg.textContent = 'Processing...';
+
+            const email = emailInput.value;
+            const password = passwordInput.value;
+
+            try {
+                if (isLogin) {
+                    // Login
+                    const formData = new URLSearchParams();
+                    formData.append('username', email); // OAuth2 expects username
+                    formData.append('password', password);
+
+                    const res = await fetch('/api/auth/token', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: formData
+                    });
+
+                    if (!res.ok) throw new Error((await res.json()).detail || 'Login failed');
+
+                    const data = await res.json();
+                    localStorage.setItem('token', data.access_token);
+                    window.location.href = '/';
+                } else {
+                    // Register
+                    const res = await fetch('/api/auth/register', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            email,
+                            password,
+                            full_name: nameInput.value
+                        })
+                    });
+
+                    if (!res.ok) throw new Error((await res.json()).detail || 'Registration failed');
+
+                    // Auto login after register
+                    const formData = new URLSearchParams();
+                    formData.append('username', email);
+                    formData.append('password', password);
+
+                    const loginRes = await fetch('/api/auth/token', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: formData
+                    });
+
+                    if (!loginRes.ok) throw new Error('Account created but login failed. Please try logging in.');
+
+                    const data = await loginRes.json();
+                    localStorage.setItem('token', data.access_token);
+                    window.location.href = '/';
+                }
+            } catch (err) {
+                errorMsg.textContent = err.message;
+            }
+        });
+    </script>
+</body>
+</html>

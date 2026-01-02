@@ -10,33 +10,23 @@ from typing import Dict, Any, Optional
 from google import genai
 from browser_use import Agent, Browser
 from browser_use.llm import ChatGoogle
-from utils.password_generator import generate_strong_password
+from app.utils.password_generator import generate_strong_password
+from app.services.supabase_client import supabase_service
 
 class ApplierAgent:
     def __init__(self, api_key: str):
         self.api_key = api_key
         self.llm = ChatGoogle(model='gemini-2.5-flash', api_key=api_key)
-        self.credentials_path = "data/credentials.json"
-
-        # Ensure credentials file exists
-        self._ensure_credentials_file()
-
-    def _ensure_credentials_file(self):
-        if not os.path.exists(self.credentials_path):
-            os.makedirs(os.path.dirname(self.credentials_path), exist_ok=True)
-            with open(self.credentials_path, "w") as f:
-                json.dump([], f)
+        # Credentials now handled via Supabase
 
     def _get_matching_credentials(self, email: str) -> str:
         """Returns a string representation of saved credentials matching the user's email."""
         try:
-            with open(self.credentials_path, "r") as f:
-                creds = json.load(f)
+            creds = supabase_service.get_credentials(email)
 
             output = []
             for c in creds:
-                if c.get('email') == email:
-                    output.append(f"- Domain: {c.get('domain')} | Email: {c.get('email')} | Password: {c.get('password')}")
+                output.append(f"- Domain: {c.get('domain')} | Email: {c.get('email')} | Password: {c.get('password')}")
 
             if not output:
                 return "No saved credentials for this email."
@@ -46,32 +36,8 @@ class ApplierAgent:
             return "Error reading credentials."
 
     def _save_credential(self, domain: str, email: str, password: str):
-        """Appends a new credential to the storage file."""
-        try:
-            with open(self.credentials_path, "r") as f:
-                creds = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            creds = []
-
-        # Avoid duplicates for the same domain/email
-        for c in creds:
-             if c.get("domain") == domain and c.get("email") == email:
-                 if c.get("password") != password:
-                     # Update password
-                     c["password"] = password
-                     with open(self.credentials_path, "w") as f:
-                        json.dump(creds, f, indent=2)
-                 return
-
-        creds.append({
-            "domain": domain,
-            "email": email,
-            "password": password,
-            "created_at": datetime.datetime.now().isoformat()
-        })
-
-        with open(self.credentials_path, "w") as f:
-            json.dump(creds, f, indent=2)
+        """Appends a new credential to the database."""
+        supabase_service.save_credential(domain, email, password)
 
     async def _resolve_application_url(self, job_url: str) -> str:
         """
