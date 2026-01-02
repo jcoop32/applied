@@ -8,6 +8,7 @@ import os
 from app.api.uploads import router as uploads_router
 from app.api.auth import router as auth_router
 from app.api.profile import router as profile_router
+from app.api.agents import router as agents_router
 
 app = FastAPI(title="Applied Agent UI", description="UI for Resume Management and Agent Control")
 
@@ -24,6 +25,7 @@ app.add_middleware(
 app.include_router(auth_router, prefix="/api/auth", tags=["Auth"])
 app.include_router(uploads_router, prefix="/api", tags=["Uploads"])
 app.include_router(profile_router, prefix="/api/profile", tags=["Profile"])
+app.include_router(agents_router, prefix="/api/agents", tags=["Agents"])
 
 # Mount Static Files
 static_dir = os.path.join(os.path.dirname(__file__), "static")

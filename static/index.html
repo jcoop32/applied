@@ -8,6 +8,32 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .matches-container {
+            width: 90%;
+            max-width: 800px;
+            background: #1a1a2e;
+            padding: 30px;
+            border-radius: 16px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        .btn-close {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 2rem;
+            cursor: pointer;
+        }
+    </style>
 </head>
 <body>
     <div class="background-blobs">
@@ -61,6 +87,34 @@
             window.location.href = '/login';
         });
     </script>
+    <!-- Resume Details Modal -->
+    <div id="resume-details-modal" class="modal-overlay" style="display: none;">
+        <div class="matches-container glass-panel" style="max-width: 900px; height: 80vh; display: flex; flex-direction: column;">
+
+            <!-- Header -->
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 15px; margin-bottom: 20px;">
+                <div>
+                     <h2 id="modal-resume-title" style="margin: 0; color: white;">Resume Details</h2>
+                     <div id="modal-status-bar" style="font-size: 0.9rem; color: var(--text-secondary); margin-top: 5px;">Status: Idle</div>
+                </div>
+                <div style="display: flex; gap: 10px;">
+                     <button id="modal-btn-find-jobs" class="btn-primary">🔍 Find Jobs</button>
+                     <a id="modal-btn-view-file" href="#" target="_blank" class="btn-secondary">📄 View PDF</a>
+                     <button onclick="closeResumeModal()" class="btn-close">×</button>
+                </div>
+            </div>
+
+            <!-- Content Area (Scrollable) -->
+            <div id="modal-matches-list" style="flex-grow: 1; overflow-y: auto; display: grid; gap: 15px; align-content: start;">
+                <!-- Matches injected here -->
+                <div style="text-align: center; color: var(--text-secondary); margin-top: 50px;">
+                    <p>No jobs found yet.</p>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
     <script src="/script.js"></script>
 </body>
 </html>

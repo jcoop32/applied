@@ -14,8 +14,9 @@ from app.utils.password_generator import generate_strong_password
 from app.services.supabase_client import supabase_service
 
 class ApplierAgent:
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, headless: bool = True):
         self.api_key = api_key
+        self.headless = headless
         self.llm = ChatGoogle(model='gemini-2.5-flash', api_key=api_key)
         # Credentials now handled via Supabase
 
@@ -207,7 +208,7 @@ class ApplierAgent:
 
         # Ensure browser has some security options disabled to allow file access if needed?
         # Usually standard config is fine.
-        browser = Browser(headless=False)
+        browser = Browser(headless=self.headless)
 
         async def ask_for_human_help() -> str:
             """

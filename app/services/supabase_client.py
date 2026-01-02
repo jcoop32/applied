@@ -61,6 +61,12 @@ class SupabaseService:
             print(f"❌ Supabase Upload Error: {e}")
             raise e
 
+    def upload_file(self, file_content: bytes, file_name: str, user_id: int, content_type: str = "application/octet-stream") -> str:
+        """
+        Generic wrapper for uploading files to the user's folder.
+        """
+        return self.upload_resume(file_content, file_name, user_id, content_type)
+
     def list_resumes(self, user_id: int):
         """
         Lists resumes in the user's specific folder.
@@ -207,6 +213,94 @@ class SupabaseService:
         except Exception as e:
              print(f"❌ Supabase Delete Error: {e}")
              raise e
+
+    # --- Leads / Jobs Management ---
+    def save_leads_bulk(self, user_id: int, resume_filename: str, leads: list):
+        """
+        Inserts multiple leads into the 'leads' table.
+        leads: list of dicts with keys (title, company, url, match_score, match_reason, query_source)
+        """
+        if not self.client:
+             print("⚠️ Supabase client not initialized.")
+             return
+
+        if not leads:
+            return
+
+        # Prepare records
+        records = []
+        for lead in leads:
+            records.append({
+                "user_id": user_id,
+                "resume_filename": resume_filename,
+                "title": lead.get("title"),
+                "company": lead.get("company"),
+                "url": lead.get("url"),
+                "match_score": lead.get("match_score"),
+                "match_reason": lead.get("match_reason"),
+                "query_source": lead.get("query_source"),
+                "status": "NEW"
+            })
+
+        try:
+            # Application-side deduplication to ensure cumulative add without overwriting
+            # 1. Fetch existing URLs for this user/resume
+            existing_res = self.client.table("leads")\
+                .select("url")\
+                .eq("user_id", user_id)\
+                .eq("resume_filename", resume_filename)\
+                .execute()
+
+            existing_urls = {row['url'] for row in existing_res.data} if existing_res.data else set()
+
+            # 2. Filter out duplicates
+            new_records = []
+            for lead in leads:
+                if lead.get("url") not in existing_urls:
+                    new_records.append({
+                        "user_id": user_id,
+                        "resume_filename": resume_filename,
+                        "title": lead.get("title"),
+                        "company": lead.get("company"),
+                        "url": lead.get("url"),
+                        "match_score": lead.get("match_score"),
+                        "match_reason": lead.get("match_reason"),
+                        "query_source": lead.get("query_source"),
+                        "status": "NEW",
+                        # "created_at": "now()" # Supabase defaults this usually
+                    })
+
+            if new_records:
+                self.client.table("leads").insert(new_records).execute()
+                print(f"✅ Saved {len(new_records)} new leads to DB (skipped {len(leads) - len(new_records)} duplicates).")
+            else:
+                 print("ℹ️ No new leads to save (all duplicates).")
+
+        except Exception as e:
+             print(f"❌ Supabase Leads Save Error: {e}")
+
+    def get_leads(self, user_id: int, resume_filename: str, limit: int = 50):
+        """
+        Fetches leads for a specific resume from the 'leads' table.
+        """
+        if not self.client:
+             return []
+
+        try:
+            # Order by match_score desc, then created_at desc
+            response = self.client.table("leads")\
+                .select("*")\
+                .eq("user_id", user_id)\
+                .eq("resume_filename", resume_filename)\
+                .order("match_score", desc=True)\
+                .limit(limit)\
+                .execute()
+
+            return response.data
+        except Exception as e:
+            print(f"❌ Supabase Leads Fetch Error: {e}")
+            return []
+
 
 # Singleton instance
 supabase_service = SupabaseService()

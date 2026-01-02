@@ -135,6 +135,7 @@ async function fetchResumes() {
 
         globalFiles = files; // Store for other uses if needed
         renderList(files, primaryName);
+        checkDashboardStatuses(); // Update UI with agent status
 
     } catch (error) {
         console.error("Fetch error:", error);
@@ -153,16 +154,16 @@ function renderList(files, primaryName) {
         const isPrimary = file.name === primaryName;
 
         return `
-        <div class="resume-item">
-            <div class="resume-info">
-                <span class="resume-name">
+        <div class="resume-item" id="resume-item-${file.name}">
+            <div class="resume-info" onclick="openResumeDetails('${file.name}', '${file.url}')" style="cursor: pointer;">
+                <span class="resume-name" style="text-decoration: underline; text-decoration-color: rgba(255,255,255,0.3);">
                     ${isPrimary ? '<span class="primary-badge" title="Primary Resume">⭐</span>' : ''}
                     ${file.name}
                 </span>
                 <span class="resume-date">${new Date(file.created_at).toLocaleDateString()}</span>
             </div>
-            <div style="display:flex; align-items:center;">
-                <a href="${file.url}" target="_blank" class="resume-link">View</a>
+            <div style="display:flex; align-items:center; gap: 8px;">
+                <button onclick="openResumeDetails('${file.name}', '${file.url}')" class="btn-secondary" style="font-size:0.8rem; padding: 4px 8px;">📂 Open</button>
                 <button onclick="deleteResume('${file.name}')" class="btn-delete" title="Delete">🗑️</button>
             </div>
         </div>
@@ -190,6 +191,154 @@ window.deleteResume = async function(filename) {
         alert(`Failed to delete: ${e.message}`);
     }
 };
+
+// --- Dashboard Agent Logic (Resume Details Modal) ---
+
+let currentModalResume = null;
+let dashboardPollInterval = null;
+
+// Poll Statuses (Simplified: Just update the modal if open)
+async function checkDashboardStatuses() {
+    if (currentModalResume) {
+        await refreshModalStatus(currentModalResume);
+    }
+}
+
+// Open Modal
+window.openResumeDetails = async (filename, fileUrl) => {
+    currentModalResume = filename;
+
+    const modal = document.getElementById('resume-details-modal');
+    document.getElementById('modal-resume-title').textContent = filename;
+    document.getElementById('modal-btn-view-file').href = fileUrl;
+
+    const findBtn = document.getElementById('modal-btn-find-jobs');
+    const statusDiv = document.getElementById('modal-status-bar');
+    const listDiv = document.getElementById('modal-matches-list');
+
+    modal.style.display = 'flex';
+
+    // Reset state
+    statusDiv.textContent = "Checking status...";
+    listDiv.innerHTML = '<p style="text-align:center; color:var(--text-secondary);">Loading...</p>';
+    findBtn.onclick = () => triggerResumeSearch(filename);
+
+    // Fetch initial status & matches
+    await refreshModalStatus(filename);
+
+    // Start Polling while modal is open
+    if (dashboardPollInterval) clearInterval(dashboardPollInterval);
+    dashboardPollInterval = setInterval(() => checkDashboardStatuses(), 4000);
+};
+
+window.closeResumeModal = () => {
+    document.getElementById('resume-details-modal').style.display = 'none';
+    currentModalResume = null;
+    if (dashboardPollInterval) clearInterval(dashboardPollInterval);
+};
+
+// Refresh Status Logic
+async function refreshModalStatus(filename) {
+    if (!filename) return;
+    const headers = getAuthHeaders();
+    if (!headers) return;
+
+    const findBtn = document.getElementById('modal-btn-find-jobs');
+    const statusDiv = document.getElementById('modal-status-bar');
+    const listDiv = document.getElementById('modal-matches-list');
+
+    try {
+        const res = await fetch(`/api/agents/matches?resume_filename=${encodeURIComponent(filename)}`, { headers });
+        const data = await res.json();
+
+        const statusObj = data.status || {};
+        const state = statusObj.status || "IDLE";
+        const matches = data.matches || [];
+
+        // Update Status Bar
+        let statusText = `Status: ${state}`;
+        if (state === 'SEARCHING') statusText = "Status: 🕵️ Researching Job Sites... (Background)";
+        if (state === 'COMPLETED') statusText = `Status: ✅ Completed (${matches.length} matches)`;
+        statusDiv.textContent = statusText;
+
+        // Update Button State
+        if (state === 'SEARCHING') {
+            findBtn.disabled = true;
+            findBtn.textContent = "⏳ Working...";
+        } else {
+            findBtn.disabled = false;
+            findBtn.textContent = (state === 'COMPLETED') ? "🔄 Re-Scan" : "🔍 Find Jobs";
+        }
+
+        // Render Matches
+        if (matches.length > 0) {
+            listDiv.innerHTML = matches.map(m => `
+                <div class="job-card" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; border-left: 4px solid var(--accent); color: white;">
+                    <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+                        <h4 style="margin:0;">${m.title}</h4>
+                        <span style="font-size:0.8rem; background:rgba(255,255,255,0.1); padding:2px 6px; border-radius:4px;">${m.match_score}% Match</span>
+                    </div>
+                    <div style="font-size:0.9rem; color:var(--text-secondary); margin-bottom:10px;">
+                        ${m.company} • ${m.query_source || 'Search'}
+                    </div>
+                    <p style="font-size:0.85rem; margin-bottom:10px; color: #ddd;">
+                        ${m.match_reason || ''}
+                    </p>
+                    <div style="display:flex; gap:10px;">
+                        <a href="${m.url}" target="_blank" class="btn-secondary" style="font-size:0.8rem; padding: 5px 10px;">View Link</a>
+                        <button onclick="applyToJob(this, '${m.url}', '${filename}')" class="btn-primary" style="font-size:0.8rem; padding: 5px 10px;">⚡ Quick Apply</button>
+                    </div>
+                </div>
+            `).join('');
+        } else {
+             if (state === 'COMPLETED') {
+                 listDiv.innerHTML = '<p style="text-align:center; color:var(--text-secondary);">No matches found for this resume.</p>';
+             } else if (state === 'IDLE') {
+                  listDiv.innerHTML = '<div style="text-align:center; margin-top:40px;"><h3>Ready to Search</h3><p style="color:var(--text-secondary);">Click "Find Jobs" to start looking for roles matching this resume.</p></div>';
+             }
+        }
+
+    } catch (e) {
+        console.error(e);
+        statusDiv.textContent = "Status: Error updating";
+    }
+}
+
+
+async function triggerResumeSearch(filename) {
+    const findBtn = document.getElementById('modal-btn-find-jobs');
+    findBtn.disabled = true;
+    findBtn.textContent = "🚀 Starting...";
+
+    const headers = getAuthHeaders();
+    try {
+        const res = await fetch('/api/agents/research', {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ resume_filename: filename })
+        });
+        if(!res.ok) throw new Error((await res.json()).detail);
+
+        refreshModalStatus(filename);
+
+    } catch (e) {
+        alert("Error: " + e.message);
+        findBtn.disabled = false;
+        findBtn.textContent = "🔍 Find Jobs";
+    }
+}
+
+// Update fetchResumes to call checkDashboardStatuses
+const originalRenderList = renderList; // already defined? No, RenderList calls are inside fetchResumes.
+// We need to modify fetchResumes to call checkDashboardStatuses after render.
+// But we cannot easily hook inside.
+// Instead, we will override/append behavior.
+// Actually, I can just call checkDashboardStatuses() at the end of fetchResumes inside the try block.
+// But I can't modify fetchResumes without rewriting it.
+// I will rewrite fetchResumes slightly or just call checkDashboardStatuses in a timeout from renderList?
+// I updated renderList so I can add the call there? No, renderList is pure UI.
+// I'll call it in window.onload or similar?
+// Since I can't easily edit fetchResumes mid-function, I added logic to poll.
 
 // --- Profile Page Logic ---
 
@@ -344,4 +493,169 @@ async function initProfilePage() {
             parse_btn.textContent = "✨ Auto-Fill from Resume";
         }
     });
+    // 5. Agent Controls logic
+    const findJobsBtn = document.getElementById('find-jobs-btn');
+    const viewMatchesBtn = document.getElementById('view-matches-btn');
+    const matchesSection = document.getElementById('matches-section');
+    const matchesList = document.getElementById('matches-list');
+
+    // Helper: Verify Resume Selection
+    const getSelectedResume = () => {
+        const val = resume_select.value;
+        if (!val) alert("Please select a Primary Resume first.");
+        return val;
+    };
+
+    // Helper: Poll Status
+    let pollInterval = null;
+    const checkResearchStatus = async (resumeName) => {
+        try {
+            const res = await fetch(`/api/agents/matches?resume_filename=${encodeURIComponent(resumeName)}`, { headers });
+            if (!res.ok) return;
+            const data = await res.json();
+            const statusObj = data.status || {};
+            const state = statusObj.status || "IDLE";
+
+            updateAgentUI(state);
+
+            if (state === "COMPLETED" || state === "FAILED") {
+                clearInterval(pollInterval);
+            }
+        } catch (e) {
+            console.error("Poll error", e);
+        }
+    };
+
+    const updateAgentUI = (status) => {
+        if (status === "SEARCHING" || status === "QUEUED") {
+            findJobsBtn.disabled = true;
+            findJobsBtn.textContent = status === "QUEUED" ? "⏳ Queued..." : "⏳ Scanning...";
+            viewMatchesBtn.style.display = "none";
+        } else if (status === "COMPLETED") {
+            findJobsBtn.disabled = false;
+            findJobsBtn.textContent = "🔄 Re-Scan";
+            viewMatchesBtn.style.display = "inline-block";
+        } else {
+            findJobsBtn.disabled = false;
+            findJobsBtn.textContent = "🔍 Find Jobs";
+            viewMatchesBtn.style.display = "none";
+        }
+    };
+
+    // Initial Status Check
+    resume_select.addEventListener('change', () => {
+        const val = resume_select.value;
+        if (val) {
+            // Check status immediately
+            checkResearchStatus(val);
+        } else {
+            viewMatchesBtn.style.display = "none";
+        }
+    });
+
+    // Check on load if value exists (populated by fetchResumes but it's async... wait, fetchResumes sets value)
+    // We can hook into the end of fetchResumes? or just wait a bit.
+    // Actually initProfilePage calls fetchResumes.
+    // We'll add a slight delay or MutationObserver?
+    // Simpler: Just poll once after a second.
+    setTimeout(() => {
+        if (resume_select.value) checkResearchStatus(resume_select.value);
+    }, 1000);
+
+
+    findJobsBtn.addEventListener('click', async () => {
+        const resume = getSelectedResume();
+        if (!resume) return;
+
+        findJobsBtn.disabled = true;
+        findJobsBtn.textContent = "🚀 Starting...";
+
+        try {
+            const res = await fetch('/api/agents/research', {
+                method: 'POST',
+                headers: { ...headers, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ resume_filename: resume })
+            });
+            if(!res.ok) throw new Error((await res.json()).detail);
+
+            updateAgentUI("SEARCHING");
+
+            // Start Polling
+            if (pollInterval) clearInterval(pollInterval);
+            pollInterval = setInterval(() => checkResearchStatus(resume), 4000);
+
+        } catch (e) {
+            alert("Error: " + e.message);
+            updateAgentUI("IDLE");
+        }
+    });
+
+    viewMatchesBtn.addEventListener('click', async () => {
+        const resume = getSelectedResume();
+        if (!resume) return;
+
+        if (matchesSection.style.display === "block") {
+            matchesSection.style.display = "none";
+            return;
+        }
+
+        matchesSection.style.display = "block";
+        matchesList.innerHTML = '<p style="color:white;">Loading matches...</p>';
+
+        try {
+            const res = await fetch(`/api/agents/matches?resume_filename=${encodeURIComponent(resume)}`, { headers });
+            const data = await res.json();
+
+            if (!data.matches || data.matches.length === 0) {
+                matchesList.innerHTML = '<p style="color:var(--text-secondary);">No matches found.</p>';
+                return;
+            }
+
+            matchesList.innerHTML = data.matches.map(m => `
+                <div class="job-card" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; border-left: 4px solid var(--accent);">
+                    <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+                        <h4 style="margin:0;">${m.title}</h4>
+                        <span style="font-size:0.8rem; background:rgba(255,255,255,0.1); padding:2px 6px; border-radius:4px;">${m.match_score}% Match</span>
+                    </div>
+                    <div style="font-size:0.9rem; color:var(--text-secondary); margin-bottom:10px;">
+                        ${m.company} • ${m.query_source || 'Search'}
+                    </div>
+                    <p style="font-size:0.85rem; margin-bottom:10px; color: #ddd;">
+                        ${m.match_reason || ''}
+                    </p>
+                    <div style="display:flex; gap:10px;">
+                        <a href="${m.url}" target="_blank" class="btn-secondary" style="font-size:0.8rem; padding: 5px 10px;">View Link</a>
+                        <button onclick="applyToJob(this, '${m.url}', '${resume}')" class="btn-primary" style="font-size:0.8rem; padding: 5px 10px;">⚡ Quick Apply</button>
+                    </div>
+                </div>
+            `).join('');
+
+        } catch (e) {
+            matchesList.innerHTML = `<p style="color:red;">Error loading matches: ${e.message}</p>`;
+        }
+    });
+
+    // Make applyToJob global
+    window.applyToJob = async (btn, url, resume) => {
+        if (!confirm("Start background application logic for this job? (Headless Mode)")) return;
+
+        btn.disabled = true;
+        btn.textContent = "🚀 Sending...";
+
+        try {
+            const res = await fetch('/api/agents/apply', {
+                method: 'POST',
+                headers: { ...headers, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ job_url: url, resume_filename: resume })
+            });
+            if(!res.ok) throw new Error((await res.json()).detail);
+
+            btn.textContent = "✅ Started";
+            // Check status logic could be complex (another poller?), for now just fire-and-forget UI
+        } catch (e) {
+            alert("Apply Failed: " + e.message);
+            btn.textContent = "❌ Failed";
+            btn.disabled = false;
+        }
+    };
 }

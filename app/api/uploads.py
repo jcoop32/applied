@@ -43,14 +43,33 @@ async def upload_resume(
         # Re-fetch user to check (in case token is stale regarding DB state)
         # Note: Optimization would be to check the 'current_user' dict if we included it there,
         # but for now a fetch is safer.
+        # Logic: Update Primary Resume & Reset Status
+        # We must fetch the current profile to safely update `profile_data`
         user_data = supabase_service.get_user_by_email(current_user['email'])
-        if not user_data.get('primary_resume_name'):
-            # This is the first one (or they cleared it)
-            try:
-                supabase_service.update_user_profile(user_id, {"primary_resume_name": file.filename})
+        if not user_data:
+             # Should not happen given auth
+             pass
+        else:
+            updates = {}
+            current_profile_data = user_data.get('profile_data') or {}
+
+            # 1. Reset Research Status (Fix for Stale State bug)
+            if 'research_status' in current_profile_data:
+                if file.filename in current_profile_data['research_status']:
+                    # Reset to IDLE or remove
+                    current_profile_data['research_status'][file.filename] = {"status": "IDLE", "updated_at": "now"}
+                    updates["profile_data"] = current_profile_data
+
+            # 2. Auto-set Primary if empty
+            if not user_data.get('primary_resume_name'):
+                updates["primary_resume_name"] = file.filename
                 print(f"✅ Auto-set primary resume to: {file.filename}")
-            except Exception as e:
-                print(f"⚠️ Failed to auto-set primary: {e}")
+
+            if updates:
+                try:
+                    supabase_service.update_user_profile(user_id, updates)
+                except Exception as e:
+                    print(f"⚠️ Failed to update profile metadata: {e}")
 
         return {
             "message": "Upload successful",
@@ -70,6 +89,9 @@ async def list_resumes(
     try:
         user_id = current_user['id']
         files = supabase_service.list_resumes(user_id=user_id)
+        # Filter out non-allowed extensions (e.g. .json matches files)
+        files = [f for f in files if any(f['name'].lower().endswith(ext) for ext in ALLOWED_EXTENSIONS)]
+
         # Sort by creation date
         files.sort(key=lambda x: x.get('created_at', ''), reverse=True)
         return files
@@ -88,11 +110,23 @@ async def delete_resume(
     path = f"{user_id}/{filename}"
 
     try:
-        # Check if it was the primary resume
+        # Check if it was the primary resume & cleanup status
         user = supabase_service.get_user_by_email(current_user['email'])
-        if user and user.get('primary_resume_name') == filename:
-            # Unset primary
-            supabase_service.update_user_profile(user_id, {"primary_resume_name": None})
+        updates = {}
+
+        if user:
+            # 1. Unset Primary
+            if user.get('primary_resume_name') == filename:
+                updates["primary_resume_name"] = None
+
+            # 2. Cleanup Research Status
+            profile_data = user.get('profile_data') or {}
+            if 'research_status' in profile_data and filename in profile_data['research_status']:
+                del profile_data['research_status'][filename]
+                updates["profile_data"] = profile_data
+
+            if updates:
+                 supabase_service.update_user_profile(user_id, updates)
 
         supabase_service.delete_file(path)
         return {"message": "Deleted successfully"}

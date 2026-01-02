@@ -17,6 +17,10 @@ class ResearcherAgent:
         self.llm = ChatGoogle(model='gemini-2.5-flash', api_key=api_key)
         self.seen_jobs: Set[str] = set() # Hash set for deduplication
 
+        # Suppress verbose browser-use logs
+        import logging
+        logging.getLogger("browser_use").setLevel(logging.WARNING)
+
     async def generate_strategy(self, profile: dict) -> List[str]:
         """
         Analyzes the resume to generate a list of targeted search queries.
@@ -83,92 +87,88 @@ class ResearcherAgent:
         # Let's say we want ~15 raw leads per query to hit the total goal.
         max_per_query = math.ceil(limit / len(queries)) * 2 # Buffer
 
-        for query in queries:
-            if len(all_leads) >= limit:
-                break
+        # Parallel Execution Configuration
+        # We want to run queries in parallel, but limit concurrency to avoid crushing the browser/system.
+        concurrency = 3 # 3 parallel browsers is usually safe for a standard machine
+        semaphore = asyncio.Semaphore(concurrency)
 
-            print(f"\n🔎 Searching: '{query}' in '{location}'")
+        async def process_query(query: str):
+            async with semaphore:
+                if len(all_leads) >= limit: return []
 
-            query_leads_count = 0
+                print(f"🔎 Parallel Search: '{query}'")
+                query_leads = []
 
-            # Pagination Loop: Try up to 5 pages
-            for page in range(1, 6):
-                if query_leads_count >= max_per_query:
-                    print(f"   ✋ Reached reasonable depth for query '{query}'. Next.")
-                    break
+                # Using 1-2 pages depth per query for speed, since we are running parallel
+                for page in range(1, 3):
+                    if len(all_leads) + len(query_leads) >= limit: break
 
-                if len(all_leads) >= limit:
-                    break
+                    encoded_q = urllib.parse.quote(query)
+                    encoded_l = urllib.parse.quote(location)
+                    url = f"https://www.getwork.com/search?q={encoded_q}&w={encoded_l}&page={page}"
 
-                # 1. Construct URL
-                encoded_q = urllib.parse.quote(query)
-                encoded_l = urllib.parse.quote(location)
-                url = f"https://www.getwork.com/search?q={encoded_q}&w={encoded_l}&page={page}"
-                print(f"   Using URL (Page {page}): {url}")
-
-                # 2. Browser Task
-                task = (
-                    f"1. Navigate to {url}\n"
-                    f"2. Scroll down 3 times. Wait 2 seconds between scrolls.\n"
-                    f"3. Look for the main list of job cards.\n"
-                    f"4. CHECK for a 'Next' button.\n"
-                    f"5. ITERATE through the job cards found.\n"
-                    f"7. **CRITICAL**: IGNORE items marked as 'Sponsored', 'Ad'.\n"
-                    f"8. If NO jobs are found, return exactly `{{ 'jobs': [], 'has_next_page': false }}`.\n"
-                    f"9. Return: {{'jobs': [list of {{'title': str, 'company': str, 'url': str, 'snippet': str}}], 'has_next_page': bool}}"
-                )
-
-                browser = Browser(headless=True)
-                try:
-                    agent = Agent(task=task, llm=self.llm, browser=browser)
-                    history = await agent.run()
-                    raw_result = history.final_result()
-
-                    if not raw_result:
-                        break
-
+                    browser = Browser(headless=True)
                     try:
-                        clean_result = raw_result.replace('```json', '').replace('```', '').strip()
-                        data = json.loads(clean_result)
-                        if isinstance(data, list):
-                            batch_leads = data
-                            has_next_page = False
-                        else:
-                            batch_leads = data.get('jobs', [])
-                            has_next_page = data.get('has_next_page', False)
-                    except Exception:
-                        break
+                        task_prompt = (
+                            f"Go to {url}. Scroll down twice to load more results. "
+                            f"Extract ALL job cards visible. "
+                            f"Return a strict JSON object with a 'jobs' key containing the list: "
+                            f"{{'jobs': [{{'title': '...', 'company': '...', 'url': '...', 'snippet': '...'}}]}}. "
+                            f"Do NOT save to a file. Return the JSON directly in the final result."
+                        )
+                        agent = Agent(task=task_prompt, llm=self.llm, browser=browser)
+                        history = await agent.run()
 
-                    if not batch_leads:
-                        break
+                        # Logic: Extract JSON from Markdown blocks (handled multiple blocks)
+                        raw = history.final_result() or ""
 
-                    print(f"   Found {len(batch_leads)} raw items.")
+                        # Find all JSON blocks
+                        # Note: The agent might return one big block or multiple small ones
+                        json_blocks = re.findall(r'```json\s*(.*?)```', raw, re.DOTALL)
 
-                    for lead in batch_leads:
-                        # DEDUPLICATE RAW
-                        title = lead.get('title', 'Unknown').strip()
-                        company = lead.get('company', 'Unknown').strip()
-                        signature = f"{company.lower()}|{title.lower()}"
+                        # Fallback: If no markdown blocks, try to find the raw JSON object
+                        if not json_blocks:
+                            # Try to find { "jobs": ... } patterns
+                            match = re.search(r'\{.*"jobs":\s*\[.*\]\s*\}', raw, re.DOTALL)
+                            if match:
+                                json_blocks = [match.group(0)]
 
-                        if signature in self.seen_jobs:
-                            continue
+                        for block in json_blocks:
+                            try:
+                                data = json.loads(block.strip())
+                                jobs = data.get('jobs', []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
 
-                        lead['query_source'] = query
-                        all_leads.append(lead)
-                        self.seen_jobs.add(signature)
-                        query_leads_count += 1
+                                for j in jobs:
+                                    if isinstance(j, dict):
+                                        query_leads.append({**j, 'query_source': query})
+                            except:
+                                # Try a more lenient fix for "concatenated" JSON within a block?
+                                # For now, just skip bad blocks
+                                pass
 
-                    if not has_next_page:
-                        break
+                    except Exception as e:
+                        print(f"   ❌ Error on {query} pg{page}: {e}")
+                    finally:
+                        try:
+                            await browser.close()
+                        except:
+                            pass
 
-                except Exception as e:
-                    print(f"   ❌ Error: {e}")
-                finally:
-                    try:
-                        await browser.close()
-                    except:
-                        pass
+                return query_leads
 
-                await asyncio.sleep(1)
+        # Run all queries
+        tasks = [process_query(q) for q in queries]
+        results = await asyncio.gather(*tasks)
+
+        # Flatten results
+        for res in results:
+            for lead in res:
+                # Deduplicate
+                sig = f"{lead.get('company','').lower()}|{lead.get('title','').lower()}"
+                if sig not in self.seen_jobs:
+                    self.seen_jobs.add(sig)
+                    all_leads.append(lead)
+                    if len(all_leads) >= limit: break
+            if len(all_leads) >= limit: break
 
         return all_leads

@@ -90,7 +90,19 @@
                         <option value="">Select a resume...</option>
                     </select>
                 </div>
-                <button id="parse-btn" class="btn-secondary" style="margin-top: 24px;">✨ Auto-Fill from Resume</button>
+                <div style="display: flex; gap: 10px; align-items: flex-end;">
+                     <button id="find-jobs-btn" class="btn-primary" style="background: var(--primary);">🔍 Find Jobs</button>
+                     <button id="view-matches-btn" class="btn-secondary" style="display: none;">🎯 View Matches</button>
+                     <button id="parse-btn" class="btn-secondary">✨ Auto-Fill</button>
+                </div>
+            </div>
+
+            <!-- Matches Section (Hidden by default) -->
+            <div id="matches-section" style="display: none; margin-bottom: 30px; padding: 20px; background: rgba(0,0,0,0.3); border-radius: 12px; border: 1px solid var(--glass-border);">
+                <h3>Matched Jobs</h3>
+                <div id="matches-list" style="display: grid; gap: 15px; margin-top: 15px;">
+                    <!-- Job Cards inserted here -->
+                </div>
             </div>
 
             <form id="profile-form">
