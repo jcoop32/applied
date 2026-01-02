@@ -6,13 +6,20 @@ from agents.applier import ApplierAgent
 # Dummy Profile for testing
 TEST_PROFILE = {
     "name": "Joshua Cooper",
-    "email": "agenttest3@sandjexpress.space", # Use a safe test email
+    "email": "agenttest12@sandjexpress.space", # Use a safe test email
     "phone": "224-245-8826",
     "linkedin": "linkedin.com/in/joshuacooper-test",
     "github": "github.com/jcoop32",
     "portfolio": "joshuacooper.dev",
     "salary_expectations": "$120,000",
-    "location": "Remote",
+    "location": "Chicago, IL",
+    "Address": "123 Main St, Chicago, IL 60601",
+    "Voluntary Questions Answers": {
+        "Race": "Black or African American",
+        "Gender": "Male",
+        "Veteran Status": "No",
+        "Disability Status": "No"
+    },
     "education": [
         {
             "degree": "B.S. Computer Science",
