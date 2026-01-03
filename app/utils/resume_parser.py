@@ -74,6 +74,7 @@ class ResumeParser:
                 'response_schema': manual_schema,
             }
         )
+        return response.text
 
 
     async def generate_summary(self, pdf_path):

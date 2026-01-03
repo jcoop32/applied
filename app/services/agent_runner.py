@@ -42,7 +42,13 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
     try:
         # 1. Download Resume File
         remote_path = f"{user_id}/{resume_filename}"
-        file_bytes = supabase_service.download_file(remote_path)
+
+        try:
+            file_bytes = supabase_service.download_file(remote_path)
+        except Exception as dl_error:
+            print(f"❌ Failed to download resume: {dl_error}")
+            update_research_status(user_id, resume_filename, "FAILED")
+            return
 
         # Save temp for parsing
         import uuid
@@ -59,16 +65,26 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
         # Parse returns a JSON string, we need to load it
         parsed_json_str = await parser.parse_to_json(tmp_path)
 
-        try:
-            profile_blob = json.loads(parsed_json_str)
-        except json.JSONDecodeError:
-            # Fallback cleaning
-            import re
-            match = re.search(r'```json\n(.*?)\n```', parsed_json_str, re.DOTALL)
-            if match:
-                profile_blob = json.loads(match.group(1))
-            else:
-                profile_blob = {"raw_text": parsed_json_str} # Fallback
+        # Guard against Non-string return (e.g. None)
+        if not parsed_json_str or not isinstance(parsed_json_str, str):
+            print(f"⚠️ Parsing returned empty or invalid type: {type(parsed_json_str)}")
+            # Try to recover or fail
+            # Just create a minimal blob so we don't crash
+            profile_blob = {"raw_text": "Parsing Failed or Empty Response"}
+            # OR fail? If parsing fails, research is garbage.
+            # Let's try to proceed with minimal info if possible, but usually this is fatal.
+            # But earlier fallback code exists.
+        else:
+            try:
+                profile_blob = json.loads(parsed_json_str)
+            except json.JSONDecodeError:
+                # Fallback cleaning
+                import re
+                match = re.search(r'```json\n(.*?)\n```', parsed_json_str, re.DOTALL)
+                if match:
+                    profile_blob = json.loads(match.group(1))
+                else:
+                    profile_blob = {"raw_text": parsed_json_str} # Fallback
 
         # Clean up temp file
         if os.path.exists(tmp_path):
@@ -110,6 +126,11 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
 
     except Exception as e:
         print(f"❌ Worker: Research Failed: {e}")
+        # Ensure we update status to FAILED so UI unblocks
+        try:
+            update_research_status(user_id, resume_filename, "FAILED")
+        except Exception as status_err:
+             print(f"❌ Failed to final update status: {status_err}")
 
 async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, api_key: str):
     print(f"🚀 Worker: Applying to {job_url} ...")
