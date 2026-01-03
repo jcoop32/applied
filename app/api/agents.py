@@ -156,7 +156,6 @@ async def trigger_research(
     """
     Payload: { "resume_filename": "..." }
     """
-    """
     resume_filename = payload.get("resume_filename")
     limit = payload.get("limit", 20)
 
