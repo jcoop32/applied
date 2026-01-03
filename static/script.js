@@ -262,8 +262,20 @@ async function refreshModalStatus(filename) {
 
         // Update Status Bar
         let statusText = `Status: ${state}`;
-        if (state === 'SEARCHING') statusText = "Status: 🕵️ Researching Job Sites... (Background)";
-        if (state === 'COMPLETED') statusText = `Status: ✅ Completed (${matches.length} matches)`;
+        statusDiv.style.color = "var(--text-primary)"; // Reset color
+
+        if (state === 'SEARCHING') {
+             statusText = "Status: 🕵️ Researching Job Sites... (Background)";
+             statusDiv.style.color = "#fbbf24"; // Amber
+        }
+        if (state === 'COMPLETED') {
+             statusText = `Status: ✅ Completed (${matches.length} matches)`;
+             statusDiv.style.color = "#4ade80"; // Green
+        }
+        if (state === 'FAILED') {
+             statusText = "Status: ❌ Failed (Check Logs)";
+             statusDiv.style.color = "#f87171"; // Red
+        }
         statusDiv.textContent = statusText;
 
         // Update Button State
