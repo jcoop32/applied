@@ -34,7 +34,7 @@ jobs:
 
     - name: Get installed Playwright version
       id: playwright-version
-      run: echo "PLAYWRIGHT_VERSION=$(pip show playwright | grep Version | sed 's/Version: //')" >> $GITHUB_ENV
+      run: echo "PLAYWRIGHT_VERSION=$(python -c "import importlib.metadata; print(importlib.metadata.version('playwright'))")" >> $GITHUB_ENV
 
     - name: Cache Playwright browsers
       uses: actions/cache@v3
