@@ -35,8 +35,8 @@ def update_research_status(user_id: int, resume_filename: str, status: str):
         logger.error(f"Failed to update research status: {e}")
 
 
-async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str):
-    print(f"🕵️ Worker: Starting Research for {resume_filename} ...")
+async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str, limit: int = 20):
+    print(f"🕵️ Worker: Starting Research for {resume_filename} with limit {limit}...")
     update_research_status(user_id, resume_filename, "SEARCHING")
 
     try:
@@ -82,7 +82,7 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
         # 3. Research
         researcher = ResearcherAgent(api_key=api_key)
         # We use the DYNAMIC profile_blob here
-        leads = await researcher.gather_leads(profile_blob, limit=20)
+        leads = await researcher.gather_leads(profile_blob, limit=limit)
 
         # 4. Match
         matcher = MatcherAgent(api_key=api_key)
@@ -110,4 +110,13 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
 
     except Exception as e:
         print(f"❌ Worker: Research Failed: {e}")
-        update_research_status(user_id, resume_filename, "FAILED")
+
+async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, api_key: str):
+    print(f"🚀 Worker: Applying to {job_url} ...")
+    try:
+        applier = ApplierAgent(api_key=api_key)
+        # ApplierAgent should handle headless mode internally or via config
+        result_status = await applier.apply(job_url, user_profile, resume_path)
+        print(f"🏁 Worker: Applier finished: {result_status}")
+    except Exception as e:
+        print(f"❌ Worker: Applier Failed: {e}")

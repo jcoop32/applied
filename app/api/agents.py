@@ -13,139 +13,46 @@ from typing import Dict, Any
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# --- Helper: Status Persistence ---
-def update_research_status(user_id: int, resume_filename: str, status: str):
-    """
-    Updates the 'research_status' in the user's profile_data.
-    States: IDLE, SEARCHING, COMPLETED, FAILED
-    """
-    try:
-        # 1. Fetch current profile
-        # We need to fetch the raw data to avoid overwriting other potential updates
-        # But supabase_service.get_user_by_email might be too heavy if we just have ID.
-        # Actually `update_user_profile` updates columns. `profile_data` is a single column.
-        # So we must Read -> Modify -> Write.
-
-        # We don't have get_user_by_id in service, relying on what we have or adding it.
-        # Service has `update_user_profile(user_id, ...)`
-        # Let's try to fetch user by ID indirectly or assume we can pass a partial update to the JSONB if Postgres?
-        # Supabase Python client `update` usually replaces the whole JSONB object if passed as a dict.
-        # To update a deep key, we usually need a Postgres function or client-side merge.
-        # I will do client-side merge for safety.
-
-        # NOTE: accessing supabase client directly for get_by_id if needed, or allow passing current_user from router if possible context.
-        # But this runs in background, so `current_user` is not available.
-        # I will start by fetching the user using the service (adding a method if needed, or using a raw call).
-        # Service `get_user_by_email` is available? No, we have user_id.
-        # I'll add `get_user_by_id` to service or use `select * from users where id=...`
-
-        response = supabase_service.client.table("users").select("profile_data").eq("id", user_id).execute()
-        if not response.data:
-            return
-
-        current_data = response.data[0].get("profile_data") or {}
-
-        # Ensure structure
-        if "research_status" not in current_data:
-            current_data["research_status"] = {}
-
-        current_data["research_status"][resume_filename] = {
-            "status": status,
-            "updated_at": str(os.times()) # timestamps, just string or datetime
-        }
-
-        supabase_service.update_user_profile(user_id, {"profile_data": current_data})
-
-    except Exception as e:
-        logger.error(f"Failed to update research status: {e}")
-
-# --- Background Task Wrappers ---
-
-async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str, limit: int = 20):
-    print(f"🕵️ Background: Starting Research for {resume_filename} with limit {limit}...")
-    update_research_status(user_id, resume_filename, "SEARCHING")
-
-    try:
-        # 1. Fetch Resume & Parse (or get cached profile)
-        # We need the candidate profile to generate strategy.
-        # Check if profile_data has parsed info?
-        # For simplicity, we rescan or expect it in profile_data.
-        # But user might have multiple resumes.
-        # Let's Download -> Parse to be sure we have the specific resume's data.
-
-        # ... Or check `profile_data` for this resume?
-        # The current `api/profile.py` saves parsed data to the ROOT `profile_data`.
-        # This implies only ONE active resume profile at a time.
-        # I'll stick to that assumption for now, or Parsing -> JSON.
-
-        # Let's try to download and parse fresh to be robust.
-
-        # Setup Agents
-        researcher = ResearcherAgent(api_key=api_key)
-
-        # Retrieve Profile Data (Candidate Info)
-        # We can fetch the user to get `profile_data` which allegedly contains the parsed resume.
-        user_response = supabase_service.client.table("users").select("profile_data").eq("id", user_id).execute()
-        profile_blob = user_response.data[0].get("profile_data", {}) if user_response.data else {}
-
-        # If the blob looks like a parsed resume, use it.
-        # Otherwise, we might need to Trigger Parse.
-        # For now, assume it's there or pass reasonable defaults.
-
-        # 2. Research
-        leads = await researcher.gather_leads(profile_blob, limit=limit)
-
-        # 3. Match
-        matcher = MatcherAgent(api_key=api_key)
-        scored_matches = await matcher.filter_and_score_leads(leads, profile_blob, limit=10)
-
-        # 4. Save Results
-        # Save to Storage as JSON
-        results_filename = f"matches_{resume_filename}.json" # e.g. matches_resume.pdf.json
-
-        # Serialize
-        json_bytes = json.dumps(scored_matches, indent=2).encode('utf-8')
-
-        supabase_service.upload_file(
-            file_content=json_bytes,
-            file_name=results_filename,
-            user_id=user_id,
-            content_type="application/json"
-        )
-
-        # Save to DB (Table)
-        try:
-             supabase_service.save_leads_bulk(user_id, resume_filename, scored_matches)
-        except Exception as db_err:
-             print(f"⚠️ DB Save Failed: {db_err}")
-
-        print(f"✅ Background: Research Completed. Saved {len(scored_matches)} matches.")
-        update_research_status(user_id, resume_filename, "COMPLETED")
-
-    except Exception as e:
-        print(f"❌ Background: Research Failed: {e}")
-        update_research_status(user_id, resume_filename, "FAILED")
-
-
-async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, api_key: str):
-    print(f"🚀 Background: Applying to {job_url} ...")
-    try:
-        applier = ApplierAgent(api_key=api_key)
-        # Headless True by default as requested
-        # Note: ApplierAgent code currently might default to False, checking/patching later.
-        # But we can't easily patch the init without changing the class.
-        # The prompt mentioned "headless true". I will update ApplierAgent class separately.
-
-        result_status = await applier.apply(job_url, user_profile, resume_path)
-        print(f"🏁 Background: Applier finished: {result_status}")
-
-        # Optional: Save application log to DB?
-
-    except Exception as e:
-        print(f"❌ Background: Applier Failed: {e}")
+from app.services.agent_runner import run_research_pipeline, update_research_status, run_applier_task
 
 
 # --- Routes ---
+
+import httpx
+
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+GITHUB_REPO_OWNER = os.getenv("GITHUB_REPO_OWNER")
+GITHUB_REPO_NAME = os.getenv("GITHUB_REPO_NAME")
+USE_GITHUB_ACTIONS = os.getenv("USE_GITHUB_ACTIONS", "true").lower() == "true"
+
+async def dispatch_github_action(task: str, payload: dict):
+    if not GITHUB_TOKEN or not GITHUB_REPO_OWNER or not GITHUB_REPO_NAME:
+        logger.warning("GitHub configuration missing. Falling back to local execution (if applicable) or failing.")
+        # If we want fallback, we need to handle it. For now, assuming user set configs.
+        return False
+
+    url = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/actions/workflows/agent_runner.yml/dispatches"
+    headers = {
+        "Authorization": f"Bearer {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+
+    # Payload must be a string for the input
+    data = {
+        "ref": "main", # Or current branch
+        "inputs": {
+            "task": task,
+            "payload": json.dumps(payload)
+        }
+    }
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(url, headers=headers, json=data)
+        if response.status_code != 204:
+            logger.error(f"Failed to dispatch GitHub Action: {response.text}")
+            return False
+
+    return True
 
 @router.post("/research")
 async def trigger_research(
@@ -167,19 +74,44 @@ async def trigger_research(
         raise HTTPException(status_code=400, detail="resume_filename is required")
 
     api_key = os.getenv("GEMINI_API_KEY")
+    # If using GitHub Actions, the SERVER doesn't strictly need the key, but the ACTION does.
+    # However, we still might check it for config health or local fallback.
+
+    user_id = current_user['id']
+
+    # Update status to SEARCHING immediately for UI responsiveness
+    # The Action will also update it, but there might be a delay in dispatch.
+    # We need to import update_research_status to do this locally.
+    update_research_status(user_id, resume_filename, "SEARCHING")
+
+    # Dispatch
+    if USE_GITHUB_ACTIONS:
+        action_payload = {
+            "user_id": user_id,
+            "resume_filename": resume_filename,
+            "limit": limit
+        }
+        success = await dispatch_github_action("research", action_payload)
+
+        if success:
+            return {"message": "Research started (GitHub Action)", "status": "SEARCHING"}
+        else:
+            # Fallback to local?
+            pass
+
+    # Local Fallback (or if Actions disabled)
     if not api_key:
         raise HTTPException(status_code=503, detail="Server misconfiguration: No API Key")
 
-    # Trigger background task
     background_tasks.add_task(
         run_research_pipeline,
-        user_id=current_user['id'],
+        user_id=user_id,
         resume_filename=resume_filename,
         api_key=api_key,
         limit=limit
     )
 
-    return {"message": "Research started", "status": "SEARCHING"}
+    return {"message": "Research started (Local)", "status": "SEARCHING"}
 
 @router.get("/matches")
 async def get_matches(
@@ -244,16 +176,24 @@ async def trigger_apply(
     if 'full_name' not in profile_blob and user_data.get('full_name'):
         profile_blob['full_name'] = user_data.get('full_name')
 
+    user_id = current_user['id']
+
+    if USE_GITHUB_ACTIONS:
+        action_payload = {
+            "user_id": user_id,
+            "job_url": job_url,
+            "resume_filename": resume_filename,
+            "user_profile": profile_blob
+        }
+        success = await dispatch_github_action("apply", action_payload)
+        if success:
+             return {"message": "Application started (GitHub Action)"}
+
     # Construct resume path (temp download needed? Applier handles local path logic)
     # The ApplierAgent.apply methods expects a LOCAL file path.
     # We need to download it first or let Applier handle it.
-    # The current ApplierAgent code:
-    #   if not os.path.exists(resume_path): return Error
-    # So we MUST download it to a temp path here in the background task.
 
-    # We'll wrap the download in the background task or do it here?
-    # Doing it in background is safer for latency.
-
+    # If local fallback:
     async def _download_and_apply():
         # 1. Download Resume
         try:
@@ -274,7 +214,6 @@ async def trigger_apply(
         except Exception as e:
             print(f"❌ Apply Wrapper Failed: {e}")
 
-    user_id = current_user['id']
     background_tasks.add_task(_download_and_apply)
 
-    return {"message": "Application started"}
+    return {"message": "Application started (Local)"}
