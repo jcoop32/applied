@@ -14,7 +14,7 @@ from app.utils.password_generator import generate_strong_password
 from app.services.supabase_client import supabase_service
 
 class ApplierAgent:
-    def __init__(self, api_key: str, headless: bool = True):
+    def __init__(self, api_key: str, headless: bool = False):
         self.api_key = api_key
         self.headless = headless
         self.llm = ChatGoogle(model='gemini-2.5-flash', api_key=api_key)

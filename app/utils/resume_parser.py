@@ -18,6 +18,8 @@ class ResumeParser:
                 "full_name": {"type": "STRING"},
                 "email": {"type": "STRING"},
                 "phone": {"type": "STRING"},
+                "linkedin": {"type": "STRING", "description": "LinkedIn profile URL"},
+                "website": {"type": "STRING", "description": "Personal website or portfolio URL"},
                 "location": {"type": "STRING"},
                 "skills": {"type": "ARRAY", "items": {"type": "STRING"}},
                 "summary": {"type": "STRING"},
@@ -73,4 +75,22 @@ class ResumeParser:
             }
         )
 
+
+    async def generate_summary(self, pdf_path):
+        with open(pdf_path, "rb") as f:
+            pdf_bytes = f.read()
+
+        prompt = """
+        Analyze this resume and write a concise, professional summary (max 3 sentences) suitable for a LinkedIn profile or resume header.
+        Focus on key skills, years of experience, and primary achievements.
+        Do not use specific names like "I am a..." just start with the role/adjective like "Experienced Software Engineer...".
+        """
+
+        response = self.client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=[
+                types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"),
+                prompt
+            ]
+        )
         return response.text

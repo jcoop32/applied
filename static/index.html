@@ -97,7 +97,11 @@
                      <h2 id="modal-resume-title" style="margin: 0; color: white;">Resume Details</h2>
                      <div id="modal-status-bar" style="font-size: 0.9rem; color: var(--text-secondary); margin-top: 5px;">Status: Idle</div>
                 </div>
-                <div style="display: flex; gap: 10px;">
+                <div style="display: flex; gap: 10px; align-items: center;">
+                     <div style="display:flex; align-items:center; gap:5px; margin-right:5px;">
+                        <span style="font-size:0.8rem; color:var(--text-secondary);">Max Jobs:</span>
+                        <input type="number" id="job-limit-input" value="20" min="1" max="99" style="width:50px; padding:5px; border-radius:4px; border:1px solid #444; background:rgba(0,0,0,0.3); color:white;">
+                     </div>
                      <button id="modal-btn-find-jobs" class="btn-primary">🔍 Find Jobs</button>
                      <a id="modal-btn-view-file" href="#" target="_blank" class="btn-secondary">📄 View PDF</a>
                      <button onclick="closeResumeModal()" class="btn-close">×</button>

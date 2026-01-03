@@ -61,8 +61,8 @@ def update_research_status(user_id: int, resume_filename: str, status: str):
 
 # --- Background Task Wrappers ---
 
-async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str):
-    print(f"🕵️ Background: Starting Research for {resume_filename} ...")
+async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str, limit: int = 20):
+    print(f"🕵️ Background: Starting Research for {resume_filename} with limit {limit}...")
     update_research_status(user_id, resume_filename, "SEARCHING")
 
     try:
@@ -93,7 +93,7 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
         # For now, assume it's there or pass reasonable defaults.
 
         # 2. Research
-        leads = await researcher.gather_leads(profile_blob, limit=20)
+        leads = await researcher.gather_leads(profile_blob, limit=limit)
 
         # 3. Match
         matcher = MatcherAgent(api_key=api_key)
@@ -156,7 +156,14 @@ async def trigger_research(
     """
     Payload: { "resume_filename": "..." }
     """
+    """
     resume_filename = payload.get("resume_filename")
+    limit = payload.get("limit", 20)
+
+    # Cap limit
+    if limit > 99: limit = 99
+    if limit < 1: limit = 1
+
     if not resume_filename:
         raise HTTPException(status_code=400, detail="resume_filename is required")
 
@@ -169,7 +176,8 @@ async def trigger_research(
         run_research_pipeline,
         user_id=current_user['id'],
         resume_filename=resume_filename,
-        api_key=api_key
+        api_key=api_key,
+        limit=limit
     )
 
     return {"message": "Research started", "status": "SEARCHING"}

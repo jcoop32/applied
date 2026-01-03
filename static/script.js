@@ -155,15 +155,16 @@ function renderList(files, primaryName) {
 
         return `
         <div class="resume-item" id="resume-item-${file.name}">
-            <div class="resume-info" onclick="openResumeDetails('${file.name}', '${file.url}')" style="cursor: pointer;">
+            <div class="resume-info" onclick="openResumeDetails('${file.name}', '${file.url}', ${file.job_count || 0})" style="cursor: pointer;">
                 <span class="resume-name" style="text-decoration: underline; text-decoration-color: rgba(255,255,255,0.3);">
                     ${isPrimary ? '<span class="primary-badge" title="Primary Resume">⭐</span>' : ''}
                     ${file.name}
+                    ${file.job_count ? `<span style="font-size:0.8rem; color:var(--text-secondary); margin-left:5px;">(${file.job_count} Jobs)</span>` : ''}
                 </span>
                 <span class="resume-date">${new Date(file.created_at).toLocaleDateString()}</span>
             </div>
             <div style="display:flex; align-items:center; gap: 8px;">
-                <button onclick="openResumeDetails('${file.name}', '${file.url}')" class="btn-secondary" style="font-size:0.8rem; padding: 4px 8px;">📂 Open</button>
+                <button onclick="openResumeDetails('${file.name}', '${file.url}', ${file.job_count || 0})" class="btn-secondary" style="font-size:0.8rem; padding: 4px 8px;">📂 Open</button>
                 <button onclick="deleteResume('${file.name}')" class="btn-delete" title="Delete">🗑️</button>
             </div>
         </div>
@@ -205,11 +206,15 @@ async function checkDashboardStatuses() {
 }
 
 // Open Modal
-window.openResumeDetails = async (filename, fileUrl) => {
+window.openResumeDetails = async (filename, fileUrl, jobCount = 0) => {
     currentModalResume = filename;
 
     const modal = document.getElementById('resume-details-modal');
-    document.getElementById('modal-resume-title').textContent = filename;
+
+    // Title with Count
+    const countText = jobCount > 0 ? ` (${jobCount} Jobs Found)` : '';
+    document.getElementById('modal-resume-title').textContent = filename + countText;
+
     document.getElementById('modal-btn-view-file').href = fileUrl;
 
     const findBtn = document.getElementById('modal-btn-find-jobs');
@@ -220,7 +225,7 @@ window.openResumeDetails = async (filename, fileUrl) => {
 
     // Reset state
     statusDiv.textContent = "Checking status...";
-    listDiv.innerHTML = '<p style="text-align:center; color:var(--text-secondary);">Loading...</p>';
+    // listDiv.innerHTML = '<p style="text-align:center; color:var(--text-secondary);">Loading...</p>';
     findBtn.onclick = () => triggerResumeSearch(filename);
 
     // Fetch initial status & matches
@@ -307,6 +312,9 @@ async function refreshModalStatus(filename) {
 
 async function triggerResumeSearch(filename) {
     const findBtn = document.getElementById('modal-btn-find-jobs');
+    const limitInput = document.getElementById('job-limit-input');
+    const limit = limitInput ? parseInt(limitInput.value, 10) : 20;
+
     findBtn.disabled = true;
     findBtn.textContent = "🚀 Starting...";
 
@@ -315,7 +323,7 @@ async function triggerResumeSearch(filename) {
         const res = await fetch('/api/agents/research', {
             method: 'POST',
             headers: { ...headers, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ resume_filename: filename })
+            body: JSON.stringify({ resume_filename: filename, limit: limit })
         });
         if(!res.ok) throw new Error((await res.json()).detail);
 
@@ -361,6 +369,130 @@ async function initProfilePage() {
         });
     }
 
+    // Helper: Populate Form
+    const populateForm = (pd) => {
+        if (!pd) return;
+
+        if(pd.contact_info) {
+            const c = pd.contact_info;
+            document.getElementById('phone').value = c.phone || '';
+            document.getElementById('linkedin').value = c.linkedin || '';
+            document.getElementById('portfolio').value = c.portfolio || '';
+            document.getElementById('address').value = c.address || '';
+        }
+
+        document.getElementById('summary').value = pd.summary || '';
+        document.getElementById('skills').value = Array.isArray(pd.skills) ? pd.skills.join(', ') : (pd.skills || '');
+
+        // Demographics (if present and user manually saved them)
+        if(pd.demographics) {
+            const d = pd.demographics;
+            if(d.race) document.getElementById('race').value = d.race;
+            if(d.veteran) document.getElementById('veteran').value = d.veteran;
+            if(d.disability) document.getElementById('disability').value = d.disability;
+            if(d.authorization) document.getElementById('authorization').value = d.authorization;
+        }
+
+        // Details (Dynamic)
+        document.getElementById('experience-container').innerHTML = '';
+        if (pd.experience && Array.isArray(pd.experience)) {
+            pd.experience.forEach(addExperienceItem);
+        }
+
+        document.getElementById('education-container').innerHTML = '';
+        if (pd.education && Array.isArray(pd.education)) {
+             pd.education.forEach(addEducationItem);
+        }
+    };
+
+    // --- Dynamic List Helpers (Moved to top) ---
+    window.addExperienceItem = (data = {}) => {
+        const container = document.getElementById('experience-container');
+        const id = Date.now() + Math.random();
+        const div = document.createElement('div');
+        div.className = 'experience-item';
+        div.style = "background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; border: 1px solid var(--glass-border); position: relative;";
+        div.innerHTML = `
+            <button type="button" onclick="this.parentElement.remove()" style="position:absolute; top:10px; right:10px; background:transparent; border:none; color:#f87171; cursor:pointer;">✖</button>
+            <div class="form-grid" style="margin-bottom:0;">
+                <div class="form-group">
+                    <label>Company</label>
+                    <input type="text" class="exp-company" value="${data.company || ''}" placeholder="Company Name">
+                </div>
+                <div class="form-group">
+                    <label>Title</label>
+                    <input type="text" class="exp-title" value="${data.title || ''}" placeholder="Job Title">
+                </div>
+                <div class="form-group">
+                    <label>Date Range</label>
+                    <input type="text" class="exp-date" value="${data.duration || ''}" placeholder="e.g. 2020 - Present">
+                </div>
+                 <div class="form-group full-width">
+                    <label>Description</label>
+                    <textarea class="exp-desc" style="min-height:60px; font-size:0.9rem;">${data.responsibilities || (Array.isArray(data.description) ? data.description.join('\\n') : (data.description || ''))}</textarea>
+                </div>
+            </div>
+        `;
+        container.appendChild(div);
+    };
+
+    window.addEducationItem = (data = {}) => {
+        const container = document.getElementById('education-container');
+        const div = document.createElement('div');
+        div.className = 'education-item';
+        div.style = "background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; border: 1px solid var(--glass-border); position: relative;";
+        div.innerHTML = `
+            <button type="button" onclick="this.parentElement.remove()" style="position:absolute; top:10px; right:10px; background:transparent; border:none; color:#f87171; cursor:pointer;">✖</button>
+            <div class="form-grid" style="margin-bottom:0;">
+                <div class="form-group">
+                    <label>School / Institution</label>
+                    <input type="text" class="edu-school" value="${data.institution || data.school || ''}" placeholder="University Name">
+                </div>
+                <div class="form-group">
+                    <label>Degree / Certificate</label>
+                    <input type="text" class="edu-degree" value="${data.degree || ''}" placeholder="B.S. Computer Science">
+                </div>
+                <div class="form-group">
+                    <label>Date</label>
+                    <input type="text" class="edu-date" value="${data.date || data.year || ''}" placeholder="e.g. 2018 - 2022">
+                </div>
+            </div>
+        `;
+        container.appendChild(div);
+    };
+
+    // Bind Add Buttons
+    const addExpBtn = document.getElementById('add-experience-btn');
+    if (addExpBtn) addExpBtn.onclick = () => addExperienceItem();
+
+    const addEduBtn = document.getElementById('add-education-btn');
+    if (addEduBtn) addEduBtn.onclick = () => addEducationItem();
+
+
+    // Make applyToJob global
+    window.applyToJob = async (btn, url, resume) => {
+        if (!confirm("Start background application logic for this job? (Headless Mode)")) return;
+
+        btn.disabled = true;
+        btn.textContent = "🚀 Sending...";
+
+        try {
+            const res = await fetch('/api/agents/apply', {
+                method: 'POST',
+                headers: { ...headers, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ job_url: url, resume_filename: resume })
+            });
+            if(!res.ok) throw new Error((await res.json()).detail);
+
+            btn.textContent = "✅ Started";
+            // Check status logic could be complex (another poller?), for now just fire-and-forget UI
+        } catch (e) {
+            alert("Apply Failed: " + e.message);
+            btn.textContent = "❌ Failed";
+            btn.disabled = false;
+        }
+    };
+
     // 1. Fetch Profile Data
     try {
         const res = await fetch('/api/profile', { headers });
@@ -370,6 +502,11 @@ async function initProfilePage() {
         full_name.value = user.full_name || '';
         profile_data.value = JSON.stringify(user.profile_data || {}, null, 2);
 
+        // Populate Form Fields
+        if (user.profile_data) {
+            populateForm(user.profile_data);
+        }
+
         // 2. Fetch Resumes for Dropdown
         const resumeRes = await fetch('/api/resumes', { headers });
         if (resumeRes.ok) {
@@ -377,7 +514,11 @@ async function initProfilePage() {
             files.forEach(f => {
                 const option = document.createElement('option');
                 option.value = f.name; // Storing filename as identifier
-                option.textContent = f.name;
+
+                // Show count if available
+                const countLabel = f.job_count ? ` (${f.job_count} Jobs Found)` : '';
+                option.textContent = f.name + countLabel;
+
                 // Pre-select if matches
                 if (user.primary_resume_name === f.name) {
                     option.selected = true;
@@ -399,18 +540,54 @@ async function initProfilePage() {
         save_btn.disabled = true;
 
         try {
-            // Validate JSON
-            let pData = {};
-            try {
-                pData = JSON.parse(profile_data.value);
-            } catch (jsonErr) {
-                throw new Error("Invalid JSON in profile data");
-            }
+            // Reconstruct JSON from fields
+            const newProfileData = {
+                contact_info: {
+                    phone: document.getElementById('phone').value,
+                    linkedin: document.getElementById('linkedin').value,
+                    portfolio: document.getElementById('portfolio').value,
+                    address: document.getElementById('address').value
+                },
+                demographics: {
+                    race: document.getElementById('race').value,
+                    veteran: document.getElementById('veteran').value,
+                    disability: document.getElementById('disability').value,
+                    authorization: document.getElementById('authorization').value
+                },
+                summary: document.getElementById('summary').value,
+                skills: document.getElementById('skills').value.split(',').map(s => s.trim()).filter(Boolean),
+                experience: [],
+                education: []
+            };
+
+            // Scrape Dynamic Inputs
+            document.querySelectorAll('.experience-item').forEach(el => {
+                newProfileData.experience.push({
+                    company: el.querySelector('.exp-company').value,
+                    title: el.querySelector('.exp-title').value,
+                    duration: el.querySelector('.exp-date').value,
+                    description: el.querySelector('.exp-desc').value
+                });
+            });
+
+            document.querySelectorAll('.education-item').forEach(el => {
+                newProfileData.education.push({
+                    school: el.querySelector('.edu-school').value,
+                    degree: el.querySelector('.edu-degree').value,
+                    date: el.querySelector('.edu-date').value
+                });
+            });
+
+            // Raw JSON fallback if empty? No, rely on UI.
+
+            // Merge with existing raw data to keep unmapped fields?
+            // Actually, safest to overwrite with structured data, but if we have extra keys they might be lost?
+            // Let's assume the UI covers everything we care about for the agent.
 
             const payload = {
                 full_name: full_name.value,
                 primary_resume_name: resume_select.value,
-                profile_data: pData
+                profile_data: newProfileData
             };
 
             const res = await fetch('/api/profile', {
@@ -425,12 +602,11 @@ async function initProfilePage() {
             if (!res.ok) throw new Error((await res.json()).detail || "Failed to update");
 
             const updated = await res.json();
-            // Create toast or status
             status_msg.textContent = "✅ Saved successfully!";
             status_msg.style.color = "#4ade80";
 
-            // Re-format JSON
-            profile_data.value = JSON.stringify(updated.profile_data, null, 2);
+            // Update hidden raw view if needed
+            // profile_data.value = JSON.stringify(updated.profile_data, null, 2);
 
         } catch (err) {
             status_msg.textContent = `❌ Error: ${err.message}`;
@@ -479,10 +655,24 @@ async function initProfilePage() {
             }
 
             const parsedData = await res.json();
-            profile_data.value = JSON.stringify(parsedData, null, 2);
+            // profile_data.value = JSON.stringify(parsedData, null, 2);
 
-            status_msg.textContent = "✅ Parsing Complete & Saved!";
-            status_msg.style.color = "#4ade80";
+            if (parsedData.profile_data) {
+                populateForm(parsedData.profile_data);
+
+
+
+                // Raw Backup
+                // if(pd.experience) document.getElementById('experience_json').value = JSON.stringify(pd.experience, null, 2);
+                // if(pd.education) document.getElementById('education_json').value = JSON.stringify(pd.education, null, 2);
+
+                status_msg.textContent = "✅ Auto-filled from resume! Format calibrated.";
+                status_msg.style.color = "#4ade80";
+            } else {
+                status_msg.textContent = "✅ Parsing Complete!";
+                status_msg.style.color = "#4ade80";
+            }
+
 
         } catch (e) {
             console.error(e);
@@ -493,9 +683,71 @@ async function initProfilePage() {
             parse_btn.textContent = "✨ Auto-Fill from Resume";
         }
     });
-    // 5. Agent Controls logic
-    const findJobsBtn = document.getElementById('find-jobs-btn');
-    const viewMatchesBtn = document.getElementById('view-matches-btn');
+
+    // 4b. Generate Summary Handler
+    const generateSummaryBtn = document.getElementById('generate-summary-btn');
+    const revertSummaryBtn = document.getElementById('revert-summary-btn');
+    let previousSummary = "";
+
+    if (generateSummaryBtn) {
+        generateSummaryBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            const selectedResume = resume_select.value;
+            if (!selectedResume) {
+                alert("Please select a Primary Resume first.");
+                return;
+            }
+
+            // Capture
+            previousSummary = document.getElementById('summary').value;
+
+            generateSummaryBtn.disabled = true;
+            generateSummaryBtn.textContent = "⏳ Generating...";
+
+            try {
+                const res = await fetch('/api/profile/summary', {
+                    method: 'POST',
+                    headers: {
+                        ...headers,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ resume_path: selectedResume })
+                });
+
+                if (!res.ok) {
+                     const errText = await res.text();
+                     throw new Error(errText);
+                }
+
+                const data = await res.json();
+                if (data.summary) {
+                    document.getElementById('summary').value = data.summary;
+                    status_msg.textContent = "✅ Summary Generated!";
+                    status_msg.style.color = "#4ade80";
+
+                    if (revertSummaryBtn) revertSummaryBtn.style.display = "inline-block";
+                }
+            } catch (e) {
+                console.error(e);
+                alert("Failed to generate summary: " + e.message);
+            } finally {
+                generateSummaryBtn.disabled = false;
+                generateSummaryBtn.textContent = "✨ Generate with AI";
+            }
+        });
+    }
+
+    if (revertSummaryBtn) {
+        revertSummaryBtn.addEventListener('click', () => {
+             document.getElementById('summary').value = previousSummary;
+             revertSummaryBtn.style.display = "none";
+             status_msg.textContent = "↩️ Summary Reverted";
+             status_msg.style.color = "var(--text-secondary)";
+        });
+    }
+    // 5. Agent Controls logic - REMOVED per user request
+    // const findJobsBtn = document.getElementById('find-jobs-btn');
+    // const viewMatchesBtn = document.getElementById('view-matches-btn');
     const matchesSection = document.getElementById('matches-section');
     const matchesList = document.getElementById('matches-list');
 
@@ -527,6 +779,8 @@ async function initProfilePage() {
     };
 
     const updateAgentUI = (status) => {
+        // Buttons removed
+        /*
         if (status === "SEARCHING" || status === "QUEUED") {
             findJobsBtn.disabled = true;
             findJobsBtn.textContent = status === "QUEUED" ? "⏳ Queued..." : "⏳ Scanning...";
@@ -540,22 +794,21 @@ async function initProfilePage() {
             findJobsBtn.textContent = "🔍 Find Jobs";
             viewMatchesBtn.style.display = "none";
         }
+        */
     };
 
-    // Initial Status Check
+    // Check on load if value exists
+    /*
     resume_select.addEventListener('change', () => {
-        const val = resume_select.value;
-        if (val) {
-            // Check status immediately
-            checkResearchStatus(val);
-        } else {
-            viewMatchesBtn.style.display = "none";
-        }
+       const val = resume_select.value;
+       if (val) {
+           // Check status immediately
+           // checkResearchStatus(val);
+       } else {
+           // viewMatchesBtn.style.display = "none";
+       }
     });
-
-    // Check on load if value exists (populated by fetchResumes but it's async... wait, fetchResumes sets value)
-    // We can hook into the end of fetchResumes? or just wait a bit.
-    // Actually initProfilePage calls fetchResumes.
+    */
     // We'll add a slight delay or MutationObserver?
     // Simpler: Just poll once after a second.
     setTimeout(() => {
@@ -563,6 +816,7 @@ async function initProfilePage() {
     }, 1000);
 
 
+    /*
     findJobsBtn.addEventListener('click', async () => {
         const resume = getSelectedResume();
         if (!resume) return;
@@ -589,7 +843,9 @@ async function initProfilePage() {
             updateAgentUI("IDLE");
         }
     });
+    */
 
+    /*
     viewMatchesBtn.addEventListener('click', async () => {
         const resume = getSelectedResume();
         if (!resume) return;
@@ -618,44 +874,26 @@ async function initProfilePage() {
                         <span style="font-size:0.8rem; background:rgba(255,255,255,0.1); padding:2px 6px; border-radius:4px;">${m.match_score}% Match</span>
                     </div>
                     <div style="font-size:0.9rem; color:var(--text-secondary); margin-bottom:10px;">
-                        ${m.company} • ${m.query_source || 'Search'}
+                        ${m.company} • ${m.query_source || 'Search'} • Added: ${m.created_at ? new Date(m.created_at).toLocaleDateString() : 'Just now'}
                     </div>
                     <p style="font-size:0.85rem; margin-bottom:10px; color: #ddd;">
                         ${m.match_reason || ''}
                     </p>
                     <div style="display:flex; gap:10px;">
                         <a href="${m.url}" target="_blank" class="btn-secondary" style="font-size:0.8rem; padding: 5px 10px;">View Link</a>
-                        <button onclick="applyToJob(this, '${m.url}', '${resume}')" class="btn-primary" style="font-size:0.8rem; padding: 5px 10px;">⚡ Quick Apply</button>
+                        <button onclick="applyToJob(this, '${m.url}', '${filename}')" class="btn-primary" style="font-size:0.8rem; padding: 5px 10px;">⚡ Quick Apply</button>
                     </div>
                 </div>
             `).join('');
 
         } catch (e) {
-            matchesList.innerHTML = `<p style="color:red;">Error loading matches: ${e.message}</p>`;
+            console.error(e);
+            matchesList.innerHTML = '<p style="color:var(--text-secondary);">Error loading matches.</p>';
         }
     });
+    */
 
-    // Make applyToJob global
-    window.applyToJob = async (btn, url, resume) => {
-        if (!confirm("Start background application logic for this job? (Headless Mode)")) return;
 
-        btn.disabled = true;
-        btn.textContent = "🚀 Sending...";
 
-        try {
-            const res = await fetch('/api/agents/apply', {
-                method: 'POST',
-                headers: { ...headers, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ job_url: url, resume_filename: resume })
-            });
-            if(!res.ok) throw new Error((await res.json()).detail);
 
-            btn.textContent = "✅ Started";
-            // Check status logic could be complex (another poller?), for now just fire-and-forget UI
-        } catch (e) {
-            alert("Apply Failed: " + e.message);
-            btn.textContent = "❌ Failed";
-            btn.disabled = false;
-        }
-    };
 }

@@ -4,6 +4,9 @@ from app.services.supabase_client import supabase_service
 from app.utils.resume_parser import ResumeParser
 import os
 import json
+import tempfile
+
+
 
 router = APIRouter()
 
@@ -104,11 +107,94 @@ async def parse_resume(
              else:
                  parsed_data = {"raw_text": json_str}
 
-        # 6. Auto-Save to Profile
-        supabase_service.update_user_profile(user_id, {"profile_data": parsed_data})
+        # --- Data Transformation (Flat -> Profile Schema) ---
+        transformed_data = {
+            "contact_info": {
+                "phone": parsed_data.get("phone", ""),
+                "linkedin": parsed_data.get("linkedin", ""),
+                "portfolio": parsed_data.get("website", ""),
+                "address": parsed_data.get("location", "")
+            },
+            "summary": parsed_data.get("summary", ""),
+            "skills": parsed_data.get("skills", []),
+            "experience": [],
+            "education": []
+        }
 
-        return parsed_data
+        # Map Experience
+        # LLM output keys: company, title, start_date, end_date, description
+        # UI expects: company, title, duration, responsibilities
+        raw_exp = parsed_data.get("work_experience", [])
+        for item in raw_exp:
+            duration = f"{item.get('start_date', '')} - {item.get('end_date', '')}"
+            transformed_data["experience"].append({
+                "company": item.get("company", ""),
+                "title": item.get("title", ""),
+                "duration": duration.strip(" - "),
+                "responsibilities": item.get("description", "")
+            })
+
+        # Map Education
+        # LLM output keys: school, degree, graduation_year
+        # UI expects: school, degree, date
+        raw_edu = parsed_data.get("education", [])
+        for item in raw_edu:
+            transformed_data["education"].append({
+                "school": item.get("school", ""),
+                "degree": item.get("degree", ""),
+                "date": item.get("graduation_year", "")
+            })
+
+        # 6. Auto-Save to Profile
+        # We also want to update the root full_name if found
+        update_payload = {"profile_data": transformed_data}
+        if "full_name" in parsed_data and parsed_data["full_name"]:
+            update_payload["full_name"] = parsed_data["full_name"]
+
+        supabase_service.update_user_profile(user_id, update_payload)
+
+        return update_payload
 
     except Exception as e:
         print(f"Parse Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/summary")
+async def generate_resume_summary(
+    resume_path: str = Body(..., embed=True),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Generates a professional summary from the specified resume.
+    """
+    if not resume_path:
+        raise HTTPException(status_code=400, detail="Resume path required")
+
+    user_id = current_user['id']
+    if "/" not in resume_path:
+        resume_path = f"{user_id}/{resume_path}"
+
+    try:
+        # Download from Supabase
+        file_bytes = supabase_service.download_file(resume_path)
+
+        # Save to temp
+        safe_name = os.path.basename(resume_path)
+        tmp_path = os.path.join(tempfile.gettempdir(), f"{user_id}_{safe_name}")
+
+        with open(tmp_path, "wb") as f:
+            f.write(file_bytes)
+
+        parser = ResumeParser(os.getenv("GEMINI_API_KEY"))
+        summary = await parser.generate_summary(tmp_path)
+
+        # Clean up
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+        return {"summary": summary.strip()}
+
+    except Exception as e:
+        print(f"Summary Generation Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

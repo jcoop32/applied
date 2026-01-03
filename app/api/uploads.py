@@ -92,6 +92,11 @@ async def list_resumes(
         # Filter out non-allowed extensions (e.g. .json matches files)
         files = [f for f in files if any(f['name'].lower().endswith(ext) for ext in ALLOWED_EXTENSIONS)]
 
+        # Fetch lead counts
+        counts = supabase_service.get_lead_counts(user_id)
+        for f in files:
+            f['job_count'] = counts.get(f['name'], 0)
+
         # Sort by creation date
         files.sort(key=lambda x: x.get('created_at', ''), reverse=True)
         return files

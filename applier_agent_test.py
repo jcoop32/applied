@@ -1,12 +1,12 @@
 import asyncio
 import os
 from dotenv import load_dotenv
-from agents.applier import ApplierAgent
+from app.agents.applier import ApplierAgent
 
 # Dummy Profile for testing
 TEST_PROFILE = {
     "name": "Joshua Cooper",
-    "email": "agenttest12@sandjexpress.space", # Use a safe test email
+    "email": "agenttest14@sandjexpress.space", # Use a safe test email
     "phone": "224-245-8826",
     "linkedin": "linkedin.com/in/joshuacooper-test",
     "github": "github.com/jcoop32",

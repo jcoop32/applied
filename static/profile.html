@@ -91,8 +91,6 @@
                     </select>
                 </div>
                 <div style="display: flex; gap: 10px; align-items: flex-end;">
-                     <button id="find-jobs-btn" class="btn-primary" style="background: var(--primary);">🔍 Find Jobs</button>
-                     <button id="view-matches-btn" class="btn-secondary" style="display: none;">🎯 View Matches</button>
                      <button id="parse-btn" class="btn-secondary">✨ Auto-Fill</button>
                 </div>
             </div>
@@ -113,13 +111,97 @@
                     </div>
                 </div>
 
-                <h3>Parsed Data (JSON)</h3>
-                <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 10px;">
-                    This data is used by the AI to fill applications. You can edit it manually or use Auto-Fill.
-                </p>
-                <div class="form-group">
-                    <textarea id="profile_data" class="json-editor" placeholder="{}"></textarea>
+                <!-- Contact & Demographics -->
+                <h3 style="margin-top:20px;">Contact & Demographics</h3>
+                <div class="form-grid">
+                     <div class="form-group">
+                        <label>Phone</label>
+                        <input type="text" id="phone" placeholder="+1 555-0123">
+                    </div>
+                    <div class="form-group">
+                        <label>LinkedIn URL</label>
+                        <input type="text" id="linkedin" placeholder="https://linkedin.com/in/...">
+                    </div>
+                    <div class="form-group">
+                        <label>Portfolio / Website</label>
+                        <input type="text" id="portfolio" placeholder="https://myportfolio.com">
+                    </div>
+                     <div class="form-group">
+                        <label>Address (City, State)</label>
+                        <input type="text" id="address" placeholder="San Francisco, CA">
+                    </div>
+
+                    <!-- Extended Demographics -->
+                    <div class="form-group">
+                        <label>Race / Ethnicity</label>
+                        <select id="race">
+                            <option value="">Select...</option>
+                            <option value="White">White</option>
+                            <option value="Black or African American">Black or African American</option>
+                            <option value="Hispanic or Latino">Hispanic or Latino</option>
+                            <option value="Asian">Asian</option>
+                            <option value="Two or More Races">Two or More Races</option>
+                            <option value="Decline">Decline to Identify</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Veteran Status</label>
+                        <select id="veteran">
+                            <option value="">Select...</option>
+                            <option value="No">No</option>
+                            <option value="Yes">Yes</option>
+                            <option value="Decline">Decline to Identify</option>
+                        </select>
+                    </div>
+                     <div class="form-group">
+                        <label>Disability Status</label>
+                        <select id="disability">
+                            <option value="">Select...</option>
+                            <option value="No">No</option>
+                            <option value="Yes">Yes</option>
+                            <option value="Decline">Decline to Identify</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Work Authorization</label>
+                        <select id="authorization">
+                            <option value="">Select...</option>
+                            <option value="Citizen">US Citizen</option>
+                            <option value="Green Card">Permanent Resident</option>
+                            <option value="Visa">Visa Sponsorship Needed</option>
+                        </select>
+                    </div>
                 </div>
+
+                <h3>Resume Details</h3>
+
+                <div class="form-group">
+                    <label>Professional Summary
+                        <button type="button" id="generate-summary-btn" class="btn-secondary" style="font-size:0.7rem; padding: 2px 6px; margin-left:10px;">✨ Generate with AI</button>
+                        <button type="button" id="revert-summary-btn" class="btn-secondary" style="font-size:0.7rem; padding: 2px 6px; margin-left:5px; display:none; background: rgba(255,255,255,0.1);">↩️ Revert</button>
+                    </label>
+                    <textarea id="summary" style="min-height: 80px;"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>Skills (Comma Separated)</label>
+                    <textarea id="skills" style="min-height: 60px;"></textarea>
+                </div>
+
+                <h3>Experience</h3>
+                <div id="experience-container" style="display:flex; flex-direction:column; gap:15px; margin-bottom:15px;">
+                    <!-- Dynamic Experience Items -->
+                </div>
+                <button type="button" id="add-experience-btn" class="btn-secondary" style="font-size:0.8rem;">+ Add Position</button>
+
+                <h3 style="margin-top:20px;">Education</h3>
+                <div id="education-container" style="display:flex; flex-direction:column; gap:15px; margin-bottom:15px;">
+                    <!-- Dynamic Education Items -->
+                </div>
+                 <button type="button" id="add-education-btn" class="btn-secondary" style="font-size:0.8rem;">+ Add Education</button>
+
+                <!-- Hidden raw backup just in case -->
+                <textarea id="profile_data" class="json-editor" style="display:none;"></textarea>
 
                 <div style="text-align: right; margin-top: 20px;">
                     <button type="submit" class="btn-primary" id="save-btn">Save Changes</button>

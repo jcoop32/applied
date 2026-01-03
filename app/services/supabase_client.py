@@ -215,6 +215,27 @@ class SupabaseService:
              raise e
 
     # --- Leads / Jobs Management ---
+    def get_lead_counts(self, user_id: int) -> dict:
+        """
+        Returns a dictionary mapping resume_filename to the count of leads found.
+        """
+        if not self.client:
+            return {}
+
+        try:
+            # Fetch all resume_filenames for this user
+            response = self.client.table("leads")\
+                .select("resume_filename")\
+                .eq("user_id", user_id)\
+                .execute()
+
+            from collections import Counter
+            counts = Counter(row['resume_filename'] for row in response.data)
+            return dict(counts)
+        except Exception as e:
+            print(f"❌ Supabase Lead Count Error: {e}")
+            return {}
+
     def save_leads_bulk(self, user_id: int, resume_filename: str, leads: list):
         """
         Inserts multiple leads into the 'leads' table.
