@@ -65,6 +65,8 @@ async def trigger_research(
     """
     resume_filename = payload.get("resume_filename")
     limit = payload.get("limit", 20)
+    job_title = payload.get("job_title") # Optional Manual Override
+    location = payload.get("location")   # Optional Manual Override
 
     # Cap limit
     if limit > 99: limit = 99
@@ -89,7 +91,9 @@ async def trigger_research(
         action_payload = {
             "user_id": user_id,
             "resume_filename": resume_filename,
-            "limit": limit
+            "limit": limit,
+            "job_title": job_title,
+            "location": location
         }
         success = await dispatch_github_action("research", action_payload)
 
@@ -108,7 +112,9 @@ async def trigger_research(
         user_id=user_id,
         resume_filename=resume_filename,
         api_key=api_key,
-        limit=limit
+        limit=limit,
+        job_title=job_title,
+        location=location
     )
 
     return {"message": "Research started (Local)", "status": "SEARCHING"}

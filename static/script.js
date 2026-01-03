@@ -234,10 +234,27 @@ window.openResumeDetails = async (filename, fileUrl, jobCount = 0) => {
     // Start Polling while modal is open
     if (dashboardPollInterval) clearInterval(dashboardPollInterval);
     dashboardPollInterval = setInterval(() => checkDashboardStatuses(), 4000);
+
+    // Bind Filter Toggle (re-bind safely)
+    const filterBtn = document.getElementById('modal-btn-filter');
+    const inputContainer = document.getElementById('manual-search-inputs');
+    if (filterBtn && inputContainer) {
+        // Remove old listeners to avoid dupes if re-opened?
+        // Actually, replacing onclick is safer.
+        filterBtn.onclick = () => {
+             const isHidden = inputContainer.style.display === 'none';
+             inputContainer.style.display = isHidden ? 'block' : 'none';
+             // Optional: visual toggle state on button?
+             filterBtn.style.background = isHidden ? 'rgba(255,255,255,0.2)' : '';
+        };
+    }
 };
 
 window.closeResumeModal = () => {
     document.getElementById('resume-details-modal').style.display = 'none';
+    const inputContainer = document.getElementById('manual-search-inputs');
+    if(inputContainer) inputContainer.style.display = 'none'; // Reset to hidden
+
     currentModalResume = null;
     if (dashboardPollInterval) clearInterval(dashboardPollInterval);
 };
@@ -284,7 +301,7 @@ async function refreshModalStatus(filename) {
             findBtn.textContent = "⏳ Working...";
         } else {
             findBtn.disabled = false;
-            findBtn.textContent = (state === 'COMPLETED') ? "🔄 Re-Scan" : "🔍 Find Jobs";
+            findBtn.textContent = (state === 'COMPLETED') ? "➕ Find More Jobs" : "🔍 Find Jobs";
         }
 
         // Render Matches
@@ -296,7 +313,7 @@ async function refreshModalStatus(filename) {
                         <span style="font-size:0.8rem; background:rgba(255,255,255,0.1); padding:2px 6px; border-radius:4px;">${m.match_score}% Match</span>
                     </div>
                     <div style="font-size:0.9rem; color:var(--text-secondary); margin-bottom:10px;">
-                        ${m.company} • ${m.query_source || 'Search'}
+                        ${m.company} • ${m.query_source || 'Search'} • <span style="font-size:0.8rem; opacity:0.8;">Added: ${m.created_at ? new Date(m.created_at).toLocaleDateString() : 'Recently'}</span>
                     </div>
                     <p style="font-size:0.85rem; margin-bottom:10px; color: #ddd;">
                         ${m.match_reason || ''}
@@ -327,15 +344,41 @@ async function triggerResumeSearch(filename) {
     const limitInput = document.getElementById('job-limit-input');
     const limit = limitInput ? parseInt(limitInput.value, 10) : 20;
 
+    // Get Manual Inputs
+    const jobTitleInput = document.getElementById('manual-job-title');
+    const locationInput = document.getElementById('manual-location');
+
+    // Only use them if visible? Or always?
+    // Let's use them if they have values. The visibility is UI-only preference.
+    const job_title = jobTitleInput ? jobTitleInput.value.trim() : "";
+    const location = locationInput ? locationInput.value.trim() : "";
+
     findBtn.disabled = true;
     findBtn.textContent = "🚀 Starting...";
 
+    // Hide inputs to provide "sent" feedback
+    const inputContainer = document.getElementById('manual-search-inputs');
+    if (inputContainer) {
+        inputContainer.style.display = 'none';
+        // Reset button background if we set it
+        const filterBtn = document.getElementById('modal-btn-filter');
+        if (filterBtn) filterBtn.style.background = '';
+    }
+
     const headers = getAuthHeaders();
     try {
+        const payload = {
+             resume_filename: filename,
+             limit: limit
+        };
+        // Add manual overrides if present
+        if (job_title) payload.job_title = job_title;
+        if (location) payload.location = location;
+
         const res = await fetch('/api/agents/research', {
             method: 'POST',
             headers: { ...headers, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ resume_filename: filename, limit: limit })
+            body: JSON.stringify(payload)
         });
         if(!res.ok) throw new Error((await res.json()).detail);
 

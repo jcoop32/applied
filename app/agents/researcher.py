@@ -73,13 +73,19 @@ class ResearcherAgent:
             print(f"⚠️ Strategy Generation Error: {e}")
             return ["Entry Level Job", "Remote Job"]
 
-    async def gather_leads(self, profile: dict, limit: int = 100) -> List[Dict[str, Any]]:
+    async def gather_leads(self, profile: dict, limit: int = 100, job_title: str = None, location: str = None) -> List[Dict[str, Any]]:
         """
         Raw Scraper: Finds as many jobs as possible for the Matcher to score.
         Does NOT verify or filter (that is the Matcher's job).
         """
-        queries = await self.generate_strategy(profile)
-        location = profile.get('location', 'Remote')
+        if job_title:
+             print(f"🎯 Manual Override: Searching for '{job_title}'")
+             queries = [job_title]
+        else:
+             queries = await self.generate_strategy(profile)
+
+        # Use provided location or fallback to profile/Remote
+        final_location = location if location else profile.get('location', 'Remote')
 
         all_leads = []
         # We want broad coverage, so we don't strictly limit per query.
@@ -104,7 +110,7 @@ class ResearcherAgent:
                     if len(all_leads) + len(query_leads) >= limit: break
 
                     encoded_q = urllib.parse.quote(query)
-                    encoded_l = urllib.parse.quote(location)
+                    encoded_l = urllib.parse.quote(final_location)
                     url = f"https://www.getwork.com/search?q={encoded_q}&w={encoded_l}&page={page}"
 
                     browser = Browser(headless=True)

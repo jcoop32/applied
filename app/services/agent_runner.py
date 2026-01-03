@@ -35,7 +35,7 @@ def update_research_status(user_id: int, resume_filename: str, status: str):
         logger.error(f"Failed to update research status: {e}")
 
 
-async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str, limit: int = 20):
+async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str, limit: int = 20, job_title: str = None, location: str = None):
     print(f"🕵️ Worker: Starting Research for {resume_filename} with limit {limit}...")
     update_research_status(user_id, resume_filename, "SEARCHING")
 
@@ -98,7 +98,7 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
         # 3. Research
         researcher = ResearcherAgent(api_key=api_key)
         # We use the DYNAMIC profile_blob here
-        leads = await researcher.gather_leads(profile_blob, limit=limit)
+        leads = await researcher.gather_leads(profile_blob, limit=limit, job_title=job_title, location=location)
 
         # 4. Match
         matcher = MatcherAgent(api_key=api_key)

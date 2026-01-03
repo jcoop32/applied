@@ -103,8 +103,23 @@
                         <input type="number" id="job-limit-input" value="20" min="1" max="99" style="width:50px; padding:5px; border-radius:4px; border:1px solid #444; background:rgba(0,0,0,0.3); color:white;">
                      </div>
                      <button id="modal-btn-find-jobs" class="btn-primary">🔍 Find Jobs</button>
+                     <button id="modal-btn-filter" class="btn-secondary" title="Manual Search Filters" style="padding: 6px 10px; font-size: 0.9rem;">⚙️</button>
                      <a id="modal-btn-view-file" href="#" target="_blank" class="btn-secondary">📄 View PDF</a>
                      <button onclick="closeResumeModal()" class="btn-close">×</button>
+                </div>
+            </div>
+
+            <!-- Manual Input Container (Hidden by default) -->
+            <div id="manual-search-inputs" style="display: none; background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid rgba(255,255,255,0.1);">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div style="display: flex; flex-direction: column; gap: 5px;">
+                        <label style="font-size: 0.8rem; color: var(--text-secondary);">Manual Job Title (Optional override)</label>
+                        <input type="text" id="manual-job-title" placeholder="e.g. Software Engineer" style="padding: 8px; border-radius: 4px; border: 1px solid #444; background: rgba(0,0,0,0.3); color: white;">
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 5px;">
+                        <label style="font-size: 0.8rem; color: var(--text-secondary);">Location (Optional override)</label>
+                        <input type="text" id="manual-location" placeholder="e.g. Remote, New York, NY" style="padding: 8px; border-radius: 4px; border: 1px solid #444; background: rgba(0,0,0,0.3); color: white;">
+                    </div>
                 </div>
             </div>
 
