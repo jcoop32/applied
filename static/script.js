@@ -172,7 +172,7 @@ function renderList(files, primaryName) {
 }
 
 // Global scope for onclick
-window.deleteResume = async function(filename) {
+window.deleteResume = async function (filename) {
     if (!confirm(`Are you sure you want to delete ${filename}?`)) return;
 
     const headers = getAuthHeaders();
@@ -242,10 +242,10 @@ window.openResumeDetails = async (filename, fileUrl, jobCount = 0) => {
         // Remove old listeners to avoid dupes if re-opened?
         // Actually, replacing onclick is safer.
         filterBtn.onclick = () => {
-             const isHidden = inputContainer.style.display === 'none';
-             inputContainer.style.display = isHidden ? 'block' : 'none';
-             // Optional: visual toggle state on button?
-             filterBtn.style.background = isHidden ? 'rgba(255,255,255,0.2)' : '';
+            const isHidden = inputContainer.style.display === 'none';
+            inputContainer.style.display = isHidden ? 'block' : 'none';
+            // Optional: visual toggle state on button?
+            filterBtn.style.background = isHidden ? 'rgba(255,255,255,0.2)' : '';
         };
     }
 };
@@ -253,7 +253,7 @@ window.openResumeDetails = async (filename, fileUrl, jobCount = 0) => {
 window.closeResumeModal = () => {
     document.getElementById('resume-details-modal').style.display = 'none';
     const inputContainer = document.getElementById('manual-search-inputs');
-    if(inputContainer) inputContainer.style.display = 'none'; // Reset to hidden
+    if (inputContainer) inputContainer.style.display = 'none'; // Reset to hidden
 
     currentModalResume = null;
     if (dashboardPollInterval) clearInterval(dashboardPollInterval);
@@ -282,16 +282,16 @@ async function refreshModalStatus(filename) {
         statusDiv.style.color = "var(--text-primary)"; // Reset color
 
         if (state === 'SEARCHING') {
-             statusText = "Status: 🕵️ Researching Job Sites... (Background)";
-             statusDiv.style.color = "#fbbf24"; // Amber
+            statusText = "Status: 🕵️ Researching Job Sites... (Background)";
+            statusDiv.style.color = "#fbbf24"; // Amber
         }
         if (state === 'COMPLETED') {
-             statusText = `Status: ✅ Completed (${matches.length} matches)`;
-             statusDiv.style.color = "#4ade80"; // Green
+            statusText = `Status: ✅ Completed (${matches.length} matches)`;
+            statusDiv.style.color = "#4ade80"; // Green
         }
         if (state === 'FAILED') {
-             statusText = "Status: ❌ Failed (Check Logs)";
-             statusDiv.style.color = "#f87171"; // Red
+            statusText = "Status: ❌ Failed (Check Logs)";
+            statusDiv.style.color = "#f87171"; // Red
         }
         statusDiv.textContent = statusText;
 
@@ -325,11 +325,11 @@ async function refreshModalStatus(filename) {
                 </div>
             `).join('');
         } else {
-             if (state === 'COMPLETED') {
-                 listDiv.innerHTML = '<p style="text-align:center; color:var(--text-secondary);">No matches found for this resume.</p>';
-             } else if (state === 'IDLE') {
-                  listDiv.innerHTML = '<div style="text-align:center; margin-top:40px;"><h3>Ready to Search</h3><p style="color:var(--text-secondary);">Click "Find Jobs" to start looking for roles matching this resume.</p></div>';
-             }
+            if (state === 'COMPLETED') {
+                listDiv.innerHTML = '<p style="text-align:center; color:var(--text-secondary);">No matches found for this resume.</p>';
+            } else if (state === 'IDLE') {
+                listDiv.innerHTML = '<div style="text-align:center; margin-top:40px;"><h3>Ready to Search</h3><p style="color:var(--text-secondary);">Click "Find Jobs" to start looking for roles matching this resume.</p></div>';
+            }
         }
 
     } catch (e) {
@@ -368,8 +368,8 @@ async function triggerResumeSearch(filename) {
     const headers = getAuthHeaders();
     try {
         const payload = {
-             resume_filename: filename,
-             limit: limit
+            resume_filename: filename,
+            limit: limit
         };
         // Add manual overrides if present
         if (job_title) payload.job_title = job_title;
@@ -380,7 +380,7 @@ async function triggerResumeSearch(filename) {
             headers: { ...headers, 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
-        if(!res.ok) throw new Error((await res.json()).detail);
+        if (!res.ok) throw new Error((await res.json()).detail);
 
         refreshModalStatus(filename);
 
@@ -428,7 +428,7 @@ async function initProfilePage() {
     const populateForm = (pd) => {
         if (!pd) return;
 
-        if(pd.contact_info) {
+        if (pd.contact_info) {
             const c = pd.contact_info;
             document.getElementById('phone').value = c.phone || '';
             document.getElementById('linkedin').value = c.linkedin || '';
@@ -436,16 +436,28 @@ async function initProfilePage() {
             document.getElementById('address').value = c.address || '';
         }
 
+        const salaryInput = document.getElementById('salary_expectations');
+        if (salaryInput) {
+            salaryInput.value = pd.salary_expectations || '';
+            // Auto-format initial value
+            if (salaryInput.value) {
+                // Determine if we need to format it (might already be formatted)
+                // Just let the user see what is saved, but we can try to format if it looks like a raw number
+                if (/^\d+$/.test(salaryInput.value)) {
+                    salaryInput.value = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(salaryInput.value);
+                }
+            }
+        }
         document.getElementById('summary').value = pd.summary || '';
         document.getElementById('skills').value = Array.isArray(pd.skills) ? pd.skills.join(', ') : (pd.skills || '');
 
         // Demographics (if present and user manually saved them)
-        if(pd.demographics) {
+        if (pd.demographics) {
             const d = pd.demographics;
-            if(d.race) document.getElementById('race').value = d.race;
-            if(d.veteran) document.getElementById('veteran').value = d.veteran;
-            if(d.disability) document.getElementById('disability').value = d.disability;
-            if(d.authorization) document.getElementById('authorization').value = d.authorization;
+            if (d.race) document.getElementById('race').value = d.race;
+            if (d.veteran) document.getElementById('veteran').value = d.veteran;
+            if (d.disability) document.getElementById('disability').value = d.disability;
+            if (d.authorization) document.getElementById('authorization').value = d.authorization;
         }
 
         // Details (Dynamic)
@@ -456,7 +468,7 @@ async function initProfilePage() {
 
         document.getElementById('education-container').innerHTML = '';
         if (pd.education && Array.isArray(pd.education)) {
-             pd.education.forEach(addEducationItem);
+            pd.education.forEach(addEducationItem);
         }
     };
 
@@ -537,7 +549,7 @@ async function initProfilePage() {
                 headers: { ...headers, 'Content-Type': 'application/json' },
                 body: JSON.stringify({ job_url: url, resume_filename: resume })
             });
-            if(!res.ok) throw new Error((await res.json()).detail);
+            if (!res.ok) throw new Error((await res.json()).detail);
 
             btn.textContent = "✅ Started";
             // Check status logic could be complex (another poller?), for now just fire-and-forget UI
@@ -557,9 +569,24 @@ async function initProfilePage() {
         full_name.value = user.full_name || '';
         profile_data.value = JSON.stringify(user.profile_data || {}, null, 2);
 
-        // Populate Form Fields
         if (user.profile_data) {
             populateForm(user.profile_data);
+        }
+
+        // 1.5 Bind Currency Formatter
+        const salaryInfo = document.getElementById('salary_expectations');
+        if (salaryInfo) {
+            salaryInfo.addEventListener('blur', (e) => {
+                const val = e.target.value;
+                if (!val) return;
+                // Strip chars to get number
+                const clean = val.replace(/[^0-9.]/g, '');
+                if (!clean) return;
+                const num = parseFloat(clean);
+                if (!isNaN(num)) {
+                    e.target.value = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(num);
+                }
+            });
         }
 
         // 2. Fetch Resumes for Dropdown
@@ -609,6 +636,7 @@ async function initProfilePage() {
                     disability: document.getElementById('disability').value,
                     authorization: document.getElementById('authorization').value
                 },
+                salary_expectations: document.getElementById('salary_expectations').value,
                 summary: document.getElementById('summary').value,
                 skills: document.getElementById('skills').value.split(',').map(s => s.trim()).filter(Boolean),
                 experience: [],
@@ -704,7 +732,7 @@ async function initProfilePage() {
                 try {
                     const jsonErr = JSON.parse(errText);
                     throw new Error(jsonErr.detail);
-                } catch(e) {
+                } catch (e) {
                     throw new Error(errText);
                 }
             }
@@ -770,8 +798,8 @@ async function initProfilePage() {
                 });
 
                 if (!res.ok) {
-                     const errText = await res.text();
-                     throw new Error(errText);
+                    const errText = await res.text();
+                    throw new Error(errText);
                 }
 
                 const data = await res.json();
@@ -794,10 +822,10 @@ async function initProfilePage() {
 
     if (revertSummaryBtn) {
         revertSummaryBtn.addEventListener('click', () => {
-             document.getElementById('summary').value = previousSummary;
-             revertSummaryBtn.style.display = "none";
-             status_msg.textContent = "↩️ Summary Reverted";
-             status_msg.style.color = "var(--text-secondary)";
+            document.getElementById('summary').value = previousSummary;
+            revertSummaryBtn.style.display = "none";
+            status_msg.textContent = "↩️ Summary Reverted";
+            status_msg.style.color = "var(--text-secondary)";
         });
     }
     // 5. Agent Controls logic - REMOVED per user request
