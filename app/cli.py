@@ -58,6 +58,8 @@ async def main():
 
             resume_filename = payload.get("resume_filename")
             user_profile = payload.get("user_profile", {}) # Expecting profile blob or email/name
+            user_profile["user_id"] = user_id # Ensure ID is passed for lead lookup
+
 
             if not user_id or not job_url or not resume_filename:
                  logger.error("Missing user_id, job_url, or resume_filename")

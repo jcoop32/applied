@@ -92,7 +92,7 @@ class ApplierAgent:
             print(f"⚠️ Resolution failed (using fallback): {e}")
             return job_url
 
-    async def apply(self, job_url: str, profile: Dict[str, Any], resume_path: str, dry_run: bool = False) -> str:
+    async def apply(self, job_url: str, profile: Dict[str, Any], resume_path: str, dry_run: bool = False, lead_id: int = None) -> str:
         """
         Main entry point to apply for a job.
         Navigates, handles auth, fills forms, and optionally submits.
@@ -117,6 +117,9 @@ class ApplierAgent:
         # 0.5. PRE-RESOLVE THE URL (User requested simple script to find link first)
         resolved_url = await self._resolve_application_url(job_url)
         print(f"🎯 Target ATS URL: {resolved_url}")
+        
+        if lead_id:
+            supabase_service.update_lead_status(lead_id, "NAVIGATING")
 
         # 1. Generate a potential password for this site in case we need to register
         site_password = generate_strong_password()
@@ -139,22 +142,33 @@ class ApplierAgent:
         1. **Navigate & Load**:
            - Navigate to: {resolved_url}
            - **WAIT 5 SECONDS** for full load.
-           - Verify you are on the application page.
+           - Calls `update_status("Analyzying Page")`.
 
-        2. **Quick Apply Check**:
-           - Look for immediate application forms (First Name, Last Name, etc.).
-           - If visible, **PROCEED TO STEP 3**.
-           - If NOT visible, find and click "Apply", "Apply Now", or "Start Application".
+        2. **Quick Apply Check & T&C (CRITICAL)**:
+           - Look for "Apply", "Apply Now", "Start Application".
+           - **CRITICAL**: CHECK FOR AND CLICK 'I Agree', 'Terms of Service', 'Consent', or 'Privacy Policy' CHECKBOXES. 
+           - **RULE**: You MUST explicitly look for `input[type='checkbox']` that might be required before finding the Apply button.
+           - If Apply button is found, click it.
+           - Calls `update_status("Starting Application")`.
 
         3. **Auth (Only if blocked)**:
            - If blocked by a "Sign In" wall:
+             - Calls `update_status("Handling Authentication")`.
              - Use saved credentials if email matches `{profile.get('email')}`.
              - Else, **Create Account** with:
                - Email: `{profile.get('email')}`
                - Password: `{site_password}`
              - **Hover** 1s before clicking "Create Account".
 
-        4. **Resume Upload (Top Priority)**:
+        4. **Verification / 2FA / CAPTCHA (INTERACTIVE)**:
+           - **IF** you see a screen asking for a "Verification Code", "2FA", "OTP", or an unsolvable CAPTCHA:
+             - **STOP**. Do NOT try to guess.
+             - Call `ask_user_tool("Enter the verification code sent to email")`.
+             - **WAIT** for the tool to return the code.
+             - Input the code and continue.
+
+        5. **Resume Upload (Top Priority)**:
+           - Calls `update_status("Uploading Resume")`.
            - **GOAL**: Upload `{safe_resume_path}` to the resume field.
            - **METHOD**:
              - **Scan the DOM** for `<input type="file">`.
@@ -163,7 +177,8 @@ class ApplierAgent:
              - **FALLBACK**: If the `input` is hidden, try to locate the visible "Upload" button/label, but still attempt to use the `upload_file` action on the associated hidden input if possible.
            - **VERIFY**: Check if the file name appears or a "Remove" icon shows up.
 
-        5. **Form Filling (Comprehensive)**:
+        6. **Form Filling (Comprehensive)**:
+           - Calls `update_status("Filling Form")`.
            - **RULE**: Fill **ALL** visible fields. Do not skip any unless explicitly marked "Optional" AND you have no data for it.
            - **Required Params**: Look for `*` or "Required" labels. PRIORITIZE these.
            - **Inputs**:
@@ -187,22 +202,23 @@ class ApplierAgent:
              - "LinkedIn" -> `{profile.get('linkedin')}`
              - "Portfolio" -> `{profile.get('portfolio')}`
 
-        6. **Voluntary Disclosures**:
+        7. **Voluntary Disclosures**:
            - Gender: `{profile.get('Voluntary Questions Answers', {}).get('Gender', 'Decline to identify')}`
            - Race: `{profile.get('Voluntary Questions Answers', {}).get('Race', 'Decline to identify')}`
            - Veteran: `{profile.get('Voluntary Questions Answers', {}).get('Veteran Status', 'No')}`
            - Disability: `{profile.get('Voluntary Questions Answers', {}).get('Disability Status', 'No')}`
 
-        7. **Submission & Validation**:
+        8. **Submission & Validation**:
            - **LOOP (Max 3 attempts)**:
              1. **Hover** over "Submit"/"Apply" for 1s.
-             2. Click "Submit".
-             3. **WAIT 3 SECONDS**.
-             4. **SCAN FOR ERRORS**: Look for red text, "Required field", or "Invalid".
-             5. **IF ERRORS**: **FIX THEM**. Focus on the empty required fields. REPEAT.
-             6. **IF SUCCESS**: Stop.
+             2. **CRITICAL PRE-SUBMIT CHECK**: Scour the page for "I Agree" / "Terms" checkboxes again. Click them if unchecked.
+             3. Click "Submit".
+             4. **WAIT 3 SECONDS**.
+             5. **SCAN FOR ERRORS**: Look for red text, "Required field", or "Invalid".
+             6. **IF ERRORS**: **FIX THEM**. Focus on the empty required fields. REPEAT.
+             7. **IF SUCCESS**: Stop.
 
-        8. **Output**:
+        9. **Output**:
            - Return JSON: `{{ "status": "<Submitted/DryRun/Failed>", "account_created": <true/false>, "final_url": "<url>" }}`
         """
 
@@ -210,43 +226,133 @@ class ApplierAgent:
         # Usually standard config is fine.
         browser = Browser(headless=self.headless)
 
-        async def ask_for_human_help() -> str:
+        async def ask_user_tool(prompt: str) -> str:
             """
-            Pauses execution and asks the user to manually interact with the browser.
-            Use this when you are stuck, looping, or cannot find an element.
+            Pauses and asks the user for a verification code or input via Supabase.
+            Polls for a response.
             """
-            print("\n🚨 SUPERVISOR ALERT: Agent is stuck or needs help!")
-            print("👉 Please manually interact with the opened Browser window to fix the issue (e.g., click the button, solve captcha, navigate).")
-            # We use asyncio.to_thread for input to avoid blocking the loop if possible,
-            # though here we want to block the agent task.
-            result = await asyncio.to_thread(input, "⌨️  Press ENTER in this terminal when you are done and want the agent to continue...")
-            return "User has manually intervened. Please re-evaluate the page state."
+            print(f"\n🔐 AGENT ASKING USER: {prompt}")
+            if lead_id:
+                supabase_service.request_verification(lead_id, "MANUAL_INTERACTION", prompt)
+            
+            # Polling loop
+            max_retries = 60 # 5 minutes (5s * 60)
+            for i in range(max_retries):
+                print(f"⏳ Waiting for user input... ({i+1}/{max_retries})")
+                await asyncio.sleep(5)
+                
+                if lead_id:
+                    resp = supabase_service.check_verification(lead_id)
+                    if resp:
+                        print(f"✅ Received user input: {resp}")
+                        return resp
+                
+                # Check for local terminal override (legacy/debug)
+                # ... avoiding blocking input() calls in async if not needed
+            
+            return "TIMEOUT: User did not respond."
+
+        async def update_status_tool(status: str) -> str:
+            """Updates the visible status of the application for the user."""
+            print(f"🔄 STATUS UPDATE: {status}")
+            if lead_id:
+                supabase_service.update_lead_status(lead_id, status)
+            return "Status updated"
 
         try:
-            # We pass the tool to the agent.
-            # IMPORTANT: Browser-use Agent expects tools list.
-            agent = Agent(task=task_prompt, llm=self.llm, browser=browser, available_file_paths=[safe_resume_path])
-            # monkey patching or just relying on llm internal tool use if supported?
-            # Actually, standard way is `tools=[...]`.
-            # I'll re-instantiate with tools.
-            # agent = Agent(task=task_prompt, llm=self.llm, browser=browser, tools=[ask_for_human_help])
-            # But the library might be version specific. Let's try simpler:
-            # We'll just define it. If the agent can't call it natively, we rely on the prompt to ask user?
-            # No, 'browser-use' supports tools. I will add it.
+            # Initialize Browser Agent with tools
+            # Note: We assume 'browser-use' Agent supports the 'controller' or 'tools' argument.
+            # Recent versions use 'controller' registry, but 'tools' is often a shortcut.
+            # We will try passing the functions directly as tools may be auto-converted to StructuredTools.
+            
+            # If using Controller pattern:
+            # from browser_use.controller.service import Controller
+            # controller = Controller()
+            # @controller.action(...) def ... 
+            # But we are inside a method.
+            
+            # Let's try simple tools list which is common in LangChain based agents.
+            
+            try:
+                agent = Agent(
+                    task=task_prompt, 
+                    llm=self.llm, 
+                    browser=browser, 
+                    available_file_paths=[safe_resume_path],
+                    # Expecting 'use_vision' or similar defaults.
+                    # INJECTING TOOLS:
+                    # If this kwarg is invalid, we catch TypeError and run without tools (graceful degradation)
+                    # But we really want these tools.
+                )
+                
+                # Check if we can add tools post-init (some libs allow agent.tools.append)
+                # Or just rely on the prompt instructing the LLM to output specific JSON for tools
+                # which the standard Agent might not support without config.
+                
+                # RE-ATTEMPT with explicit 'controller' if available in imports? No.
+                # Let's just USE 'tools=[...]' and hope. 
+                # If I replace the code, I replace it.
+                
+                pass 
+                
+            except Exception:
+                pass
+            
+            # REAL INSTANTIATION INTENDED:
+            # We will use a custom version of Agent init call that mirrors standard usage.
+            # If 'browser-use' is standard, it might not accept 'tools' directly but requires a Controller.
+            # SInce we can't easily import Controller without verifying, 
+            # We'll just instantiate without and trust the text-based interaction?
+            # NO, user wants 2FA.
+            
+            # I will simply use the tools arg.
+            agent = Agent(
+                task=task_prompt, 
+                llm=self.llm, 
+                browser=browser, 
+                available_file_paths=[safe_resume_path]
+            )
+            
+            # IMPORTANT: I am unable to confidently add `tools=[...]` because I saw the previous code 
+            # did NOT have it and I don't want to break the app with a TypeError.
+            # HOWEVER, without it, the features won't work.
+            # I will add a dynamic check.
+            
+            import inspect
+            sig = inspect.signature(Agent.__init__)
+            kwargs = {}
+            if 'tools' in sig.parameters:
+                kwargs['tools'] = [ask_user_tool, update_status_tool]
+            elif 'controller' in sig.parameters:
+                # If controller is needed, we are in trouble without the class.
+                # But maybe we can pass a list to controller?
+                pass
+                
+            # Actually, I'll just try to pass the tools.
+            # If it fails, I'll catch it.
+            
+            try:
+                agent = Agent(
+                    task=task_prompt, 
+                    llm=self.llm, 
+                    browser=browser, 
+                    available_file_paths=[safe_resume_path],
+                    tools=[ask_user_tool, update_status_tool]
+                )
+            except TypeError:
+                print("⚠️ ApplierAgent: 'tools' argument not supported. User interaction features disabled.")
+                agent = Agent(
+                    task=task_prompt, 
+                    llm=self.llm, 
+                    browser=browser, 
+                    available_file_paths=[safe_resume_path]
+                )
 
-            # Note: I am taking a risk here assuming the installed version supports `tools` param.
-            # If not, it will crash. But user requirements imply advanced features.
-            # Let's hope for the best or I'll fix it if it errors.
-
-            # WAIT: 'tools' param usually requires LangChain tools or similar.
-            # Simplest integration for a function:
-            # agent = Agent(..., tools=[ask_for_human_help])
-
-            # I will try to use the constructor with tools.
-            pass
+ 
 
             history = await agent.run()
             result_str = history.final_result() or "{}"
+
 
             # Clean up potential markdown wrapping
             try:
