@@ -13,6 +13,11 @@ RUN apt-get update && apt-get install -y \
     libxml2-dev \
     libxslt1-dev \
     zlib1g-dev \
+    libjpeg-dev \
+    libfreetype6-dev \
+    liblcms2-dev \
+    libopenjp2-7-dev \
+    libtiff-dev \
     && rm -rf /var/lib/apt/lists/*
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
