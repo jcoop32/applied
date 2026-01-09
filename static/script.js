@@ -320,7 +320,10 @@ async function refreshModalStatus(filename) {
                     </p>
                     <div style="display:flex; gap:10px;">
                         <a href="${m.url}" target="_blank" class="btn-secondary" style="font-size:0.8rem; padding: 5px 10px;">View Link</a>
-                        <button onclick="applyToJob(this, '${m.url}', '${filename}')" class="btn-primary" style="font-size:0.8rem; padding: 5px 10px;">⚡ Quick Apply</button>
+                        ${m.status === 'APPLIED'
+                    ? `<button disabled class="btn-secondary" style="font-size:0.8rem; padding: 5px 10px; opacity: 0.7; cursor: not-allowed; background: var(--success, #4ade80); color: black;">✅ Applied</button>`
+                    : `<button onclick="applyToJob(this, '${m.url}', '${filename}')" class="btn-primary" style="font-size:0.8rem; padding: 5px 10px;">⚡ Quick Apply</button>`
+                }
                     </div>
                 </div>
             `).join('');

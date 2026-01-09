@@ -300,6 +300,24 @@ class SupabaseService:
         except Exception as e:
              print(f"❌ Supabase Leads Save Error: {e}")
 
+    def update_lead_status(self, user_id: int, url: str, status: str):
+        """
+        Updates the status of a lead (e.g. to 'APPLIED').
+        """
+        if not self.client:
+             print("⚠️ Supabase client not initialized.")
+             return
+
+        try:
+            self.client.table("leads")\
+                .update({"status": status})\
+                .eq("user_id", user_id)\
+                .eq("url", url)\
+                .execute()
+            print(f"✅ Updated lead status to '{status}' for {url}")
+        except Exception as e:
+            print(f"❌ Supabase Lead Status Update Error: {e}")
+
     def get_leads(self, user_id: int, resume_filename: str, limit: int = 50):
         """
         Fetches leads for a specific resume from the 'leads' table.

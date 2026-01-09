@@ -376,9 +376,11 @@ class ApplierAgent:
             final_domain = urlparse(final_url).netloc
 
             # Save generated credentials if we created an account
-            if account_created:
-                 print(f"🔐 Saving new credential for {final_domain}")
-                 self._save_credential(final_domain, profile.get('email'), site_password)
+            if result_data.get("status") == "APPLIED" or account_created:
+                 from app.services.supabase_client import supabase_service
+                 if supabase_service:
+                     print(f"✅ Marking lead as APPLIED: {resolved_url}")
+                     supabase_service.update_lead_status(user_id, job_url, "APPLIED")
 
             return str(status)
 
