@@ -231,7 +231,7 @@ class ApplierAgent:
             Pauses and asks the user for a verification code or input via Supabase.
             Polls for a response.
             """
-            print(f"\n🔐 AGENT ASKING USER: {prompt}")
+            print(f"\\n🔐 AGENT ASKING USER: {prompt}")
             if lead_id:
                 supabase_service.request_verification(lead_id, "MANUAL_INTERACTION", prompt)
             
@@ -260,95 +260,28 @@ class ApplierAgent:
             return "Status updated"
 
         try:
-            # Initialize Browser Agent with tools
-            # Note: We assume 'browser-use' Agent supports the 'controller' or 'tools' argument.
-            # Recent versions use 'controller' registry, but 'tools' is often a shortcut.
-            # We will try passing the functions directly as tools may be auto-converted to StructuredTools.
+            # Initialize Controller
+            from browser_use import Controller
+            controller = Controller()
             
-            # If using Controller pattern:
-            # from browser_use.controller.service import Controller
-            # controller = Controller()
-            # @controller.action(...) def ... 
-            # But we are inside a method.
+            # Register tools via the registry
+            action = controller.registry.action
             
-            # Let's try simple tools list which is common in LangChain based agents.
-            
-            try:
-                agent = Agent(
-                    task=task_prompt, 
-                    llm=self.llm, 
-                    browser=browser, 
-                    available_file_paths=[safe_resume_path],
-                    # Expecting 'use_vision' or similar defaults.
-                    # INJECTING TOOLS:
-                    # If this kwarg is invalid, we catch TypeError and run without tools (graceful degradation)
-                    # But we really want these tools.
-                )
-                
-                # Check if we can add tools post-init (some libs allow agent.tools.append)
-                # Or just rely on the prompt instructing the LLM to output specific JSON for tools
-                # which the standard Agent might not support without config.
-                
-                # RE-ATTEMPT with explicit 'controller' if available in imports? No.
-                # Let's just USE 'tools=[...]' and hope. 
-                # If I replace the code, I replace it.
-                
-                pass 
-                
-            except Exception:
-                pass
-            
-            # REAL INSTANTIATION INTENDED:
-            # We will use a custom version of Agent init call that mirrors standard usage.
-            # If 'browser-use' is standard, it might not accept 'tools' directly but requires a Controller.
-            # SInce we can't easily import Controller without verifying, 
-            # We'll just instantiate without and trust the text-based interaction?
-            # NO, user wants 2FA.
-            
-            # I will simply use the tools arg.
+            @action("Ask User for Input")
+            async def ask_user_action(prompt: str):
+                return await ask_user_tool(prompt)
+
+            @action("Update Application Status")
+            async def update_status_action(status: str):
+                return await update_status_tool(status)
+
             agent = Agent(
                 task=task_prompt, 
                 llm=self.llm, 
                 browser=browser, 
-                available_file_paths=[safe_resume_path]
+                available_file_paths=[safe_resume_path],
+                controller=controller
             )
-            
-            # IMPORTANT: I am unable to confidently add `tools=[...]` because I saw the previous code 
-            # did NOT have it and I don't want to break the app with a TypeError.
-            # HOWEVER, without it, the features won't work.
-            # I will add a dynamic check.
-            
-            import inspect
-            sig = inspect.signature(Agent.__init__)
-            kwargs = {}
-            if 'tools' in sig.parameters:
-                kwargs['tools'] = [ask_user_tool, update_status_tool]
-            elif 'controller' in sig.parameters:
-                # If controller is needed, we are in trouble without the class.
-                # But maybe we can pass a list to controller?
-                pass
-                
-            # Actually, I'll just try to pass the tools.
-            # If it fails, I'll catch it.
-            
-            try:
-                agent = Agent(
-                    task=task_prompt, 
-                    llm=self.llm, 
-                    browser=browser, 
-                    available_file_paths=[safe_resume_path],
-                    tools=[ask_user_tool, update_status_tool]
-                )
-            except TypeError:
-                print("⚠️ ApplierAgent: 'tools' argument not supported. User interaction features disabled.")
-                agent = Agent(
-                    task=task_prompt, 
-                    llm=self.llm, 
-                    browser=browser, 
-                    available_file_paths=[safe_resume_path]
-                )
-
- 
 
             history = await agent.run()
             result_str = history.final_result() or "{}"
