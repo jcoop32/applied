@@ -178,9 +178,22 @@ async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, a
         print(f"🏁 Worker: Applier finished: {result_status}")
         
         if lead_id:
-             final_status = "APPLIED" if "Submit" in str(result_status) or "Success" in str(result_status) else "FAILED"
+             # Default to FAILED safest
+             final_status = "FAILED"
+             
+             # 1. Trust JSON status if available and valid
+             if isinstance(result_status, str) and result_status in ["APPLIED", "SUBMITTED", "SUCCESS"]:
+                 final_status = "APPLIED"
+             elif "Submitted" in str(result_status) or "Success" in str(result_status):
+                 final_status = "APPLIED"
+             
+             # 2. Overrule if explicit failure is detected
+             if "FAIL" in str(result_status).upper() or "ERROR" in str(result_status).upper() or "COULD NOT BE FULLY COMPLETED" in str(result_status).upper():
+                 final_status = "FAILED"
+                 
              if "DryRun" in str(result_status): final_status = "DRY_RUN"
              
+             print(f"✅ Final Status Verdict: {final_status}")
              supabase_service.update_lead_status(lead_id, final_status)
 
     except Exception as e:
