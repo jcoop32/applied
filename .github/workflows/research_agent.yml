@@ -57,5 +57,6 @@ jobs:
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
         SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        PAYLOAD: ${{ inputs.payload }}
       run: |
-        python -m app.cli --task research --payload '${{ inputs.payload }}'
+        python -m app.cli --task research --payload "$PAYLOAD"
