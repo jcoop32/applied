@@ -202,24 +202,28 @@ class ApplierAgent:
              - "LinkedIn" -> `{profile.get('linkedin')}`
              - "Portfolio" -> `{profile.get('portfolio')}`
 
-        7. **Voluntary Disclosures**:
-           - Gender: `{profile.get('Voluntary Questions Answers', {}).get('Gender', 'Decline to identify')}`
-           - Race: `{profile.get('Voluntary Questions Answers', {}).get('Race', 'Decline to identify')}`
-           - Veteran: `{profile.get('Voluntary Questions Answers', {}).get('Veteran Status', 'No')}`
-           - Disability: `{profile.get('Voluntary Questions Answers', {}).get('Disability Status', 'No')}`
+        # 7. Voluntary Disclosures (OPTIONAL):
+        #    - *Instructions*: These fields are often hidden or effectively optional. 
+        #    - **CRITICAL**: If you cannot easily find 'Veteran' or 'Disability' sections, OR if interacting with them fails after 1 attempt, **SKIP THEM**.
+        #    - Do NOT get stuck trying to scroll/find these specific fields.
+        #    - If present:
+        #      - Gender: `{profile.get('Voluntary Questions Answers', {}).get('Gender', 'Decline to identify')}`
+        #      - Race: `{profile.get('Voluntary Questions Answers', {}).get('Race', 'Decline to identify')}`
+        #      - Veteran: `{profile.get('Voluntary Questions Answers', {}).get('Veteran Status', 'No')}`
+        #      - Disability: `{profile.get('Voluntary Questions Answers', {}).get('Disability Status', 'No')}`
 
-        8. **Submission & Validation**:
-           - **LOOP (Max 3 attempts)**:
-             1. **Hover** over "Submit"/"Apply" for 1s.
-             2. **CRITICAL PRE-SUBMIT CHECK**: Scour the page for "I Agree" / "Terms" checkboxes again. Click them if unchecked.
-             3. Click "Submit".
-             4. **WAIT 3 SECONDS**.
-             5. **SCAN FOR ERRORS**: Look for red text, "Required field", or "Invalid".
-             6. **IF ERRORS**: **FIX THEM**. Focus on the empty required fields. REPEAT.
-             7. **IF SUCCESS**: Stop.
+        # 8. Submission & Validation:
+        #    - **LOOP (Max 3 attempts)**:
+        #      1. **Hover** over "Submit"/"Apply" for 1s.
+        #      2. **CRITICAL PRE-SUBMIT CHECK**: Scour the page for "I Agree" / "Terms" checkboxes again. Click them if unchecked.
+        #      3. Click "Submit".
+        #      4. **WAIT 3 SECONDS**.
+        #      5. **SCAN FOR ERRORS**: Look for red text, "Required field", or "Invalid".
+        #      6. **IF ERRORS**: **FIX THEM**. Focus on the empty required fields. REPEAT.
+        #      7. **IF SUCCESS**: Stop.
 
-        9. **Output**:
-           - Return JSON: `{{ "status": "<Submitted/DryRun/Failed>", "account_created": <true/false>, "final_url": "<url>" }}`
+        # 9. Output:
+        #    - Return JSON: `{{ "status": "<Submitted/DryRun/Failed>", "account_created": <true/false>, "final_url": "<url>" }}`
         """
 
         # Ensure browser has some security options disabled to allow file access if needed?
@@ -288,6 +292,7 @@ class ApplierAgent:
 
 
             # Clean up potential markdown wrapping
+            result_data = {} # Initialize default
             try:
                 import re
                 clean_json = re.sub(r'```json\s*|\s*```', '', result_str).strip()
@@ -302,14 +307,14 @@ class ApplierAgent:
                 print(f"⚠️ Warning: Could not parse agent JSON result: {e}. Raw: {result_str}")
                 account_created = "ACCOUNT_CREATED" in str(history) # Fallback check
                 final_url = resolved_url
-                status = result_str
+                status = result_str # Use raw string as status
 
             # Extract Final Domain
             from urllib.parse import urlparse
             final_domain = urlparse(final_url).netloc
 
             # Save generated credentials if we created an account
-            if result_data.get("status") == "APPLIED" or account_created:
+            if getattr(result_data, 'get', lambda k: None)("status") == "APPLIED" or account_created:
                  if supabase_service:
                      print(f"✅ Marking lead as APPLIED: {resolved_url}")
                      if lead_id:
