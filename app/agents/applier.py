@@ -44,14 +44,18 @@ class ApplierAgent:
         """
         Fetches the raw HTML via requests and asks the LLM
         to identify the correct job application URL using the raw content.
+        Includes 'Redirect Chaser' logic to bypass aggregators.
         """
         print(f"🕵️ Resolving true application URL for: {job_url}")
+
+        KNOWN_ATS = ["greenhouse.io", "lever.co", "workday.com", "ashbyhq.com", "bamboohr.com", "smartrecruiters.com", "icims.com"]
+        KNOWN_AGGREGATORS = ["adzuna.com", "indeed.com", "linkedin.com", "ziprecruiter.com", "glassdoor.com"]
 
         try:
             # 1. Fetch RAW HTML
             def fetch_raw():
                 headers = {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
                 }
                 response = requests.get(job_url, headers=headers, timeout=10, allow_redirects=True)
                 return response.text, response.url
@@ -64,10 +68,14 @@ class ApplierAgent:
             prompt = f"""
             I have the raw HTML content of a job posting page below.
             Find the URL for the "Apply", "Apply Now", "Apply on Company Site", or "Start Application" button.
-            Rules:
+
+            rules:
             1. Return ONLY the raw URL. No JSON, no text, no markdown.
-            2. If there are multiple, prefer the one that goes to an external ATS (like Workday, Greenhouse, Lever) over an internal "Quick Apply".
-            3. If the URL is relative (starts with /), append it to the base domain: {final_url}
+            2. PRIORITIZE links to external generic ATS platforms: {', '.join(KNOWN_ATS)}.
+            3. AVOID links to other aggregators if possible: {', '.join(KNOWN_AGGREGATORS)}.
+            4. If the only link is an aggregator (e.g. Adzuna), return it, but try to find the button that says "Go to company site" or "Apply on Employer Site".
+            5. If the URL is relative (starts with /), append it to the base domain: {final_url}
+            6. If the page shows "Access Denied", "Security Check", or similar blockage, look for ANY link that contains "redirect", "click", "authenticate", or the job ID, which might bypass the block.
 
             HTML Content (Truncated if too large):
             {html_content[:100000]}
@@ -78,11 +86,51 @@ class ApplierAgent:
                 contents=prompt
             )
 
-            extracted_url = response.text.strip()
+            extracted_text = (response.text or "").strip()
+            
+            # Regex to find the first URL in case LLM chats
+            import re
+            url_match = re.search(r'https?://[^\s<>"]+|www\.[^\s<>"]+', extracted_text)
+            if url_match:
+                extracted_url = url_match.group(0)
+            else:
+                extracted_url = extracted_text
 
             # Basic validation
             if extracted_url and "http" in extracted_url:
                 print(f"🤖 LLM identified Apply URL: {extracted_url}")
+                
+                # --- REDIRECT CHASER LOGIC ---
+                # If the URL looks like an aggregator, try to resolve the final destination via HEAD/GET
+                from urllib.parse import urlparse
+                domain = urlparse(extracted_url).netloc
+                
+                if any(agg in domain for agg in KNOWN_AGGREGATORS):
+                    print(f"⚠️ Detected Aggregator URL ({domain}). Attempting to follow redirects...")
+                    
+                    def follow_redirects(url):
+                        headers = {
+                             # Mimic a real browser to pass basic checks 
+                            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                        }
+                        try:
+                            # Use stream=True to avoid downloading body content, just header/redirect following
+                            # We use GET because some sites block HEAD
+                            r = requests.get(url, headers=headers, allow_redirects=True, timeout=15, stream=True)
+                            if r.url != url:
+                                return r.url
+                        except Exception as e:
+                            print(f"⚠️ Redirect check failed: {e}")
+                        return url
+
+                    final_dest = await asyncio.to_thread(follow_redirects, extracted_url)
+                    
+                    if final_dest != extracted_url:
+                        print(f"🎯 Redirect Chaser resolved: {extracted_url} -> {final_dest}")
+                        extracted_url = final_dest
+                    else:
+                        print(f"⚠️ Could not resolve redirect or URL is unchanged.")
+
                 return extracted_url
 
             print(f"⚠️ LLM could not find URL in HTML: {extracted_url}")

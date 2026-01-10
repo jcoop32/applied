@@ -327,6 +327,12 @@ async function refreshModalStatus(filename) {
         const state = statusObj.status || "IDLE";
         const matches = data.matches || [];
 
+        // Stop polling if terminal state
+        if ((state === 'COMPLETED' || state === 'FAILED') && dashboardPollInterval) {
+            clearInterval(dashboardPollInterval);
+            dashboardPollInterval = null;
+        }
+
         // Update Status Bar
         let statusText = `Status: ${state}`;
         statusDiv.style.color = "var(--text-primary)"; // Reset color
@@ -373,12 +379,16 @@ async function refreshModalStatus(filename) {
                         ${(() => {
                     if (m.status === 'APPLIED') {
                         return `<button disabled class="btn-secondary" style="font-size:0.8rem; padding: 5px 10px; opacity: 0.7; cursor: not-allowed; background: var(--success, #4ade80); color: black;">✅ Applied</button>`;
-                    } else if (m.status === 'APPLYING' || m.status === 'IN_PROGRESS') {
-                        return `<button disabled class="btn-secondary" style="font-size:0.8rem; padding: 5px 10px; opacity: 0.7; cursor: not-allowed; background: #fbbf24; color: black;">⏳ In Progress...</button>`;
                     } else if (m.status === 'FAILED') {
                         return `<button onclick="applyToJob(this, '${m.url}', '${filename}')" class="btn-primary" style="font-size:0.8rem; padding: 5px 10px; background: #f87171;">❌ Retry</button>`;
-                    } else {
+                    } else if (m.status === 'NEW' || !m.status) {
                         return `<button onclick="applyToJob(this, '${m.url}', '${filename}')" class="btn-primary" style="font-size:0.8rem; padding: 5px 10px;">⚡ Quick Apply</button>`;
+                    } else {
+                        // Catch-all for granular active statuses (Navigating, Filling Form, etc.)
+                        // Use a cleaned up display string
+                        let displayStatus = m.status;
+                        if (displayStatus === 'IN_PROGRESS') displayStatus = "In Progress...";
+                        return `<button disabled class="btn-secondary" style="font-size:0.8rem; padding: 5px 10px; opacity: 0.7; cursor: not-allowed; background: #fbbf24; color: black;">⏳ ${displayStatus}</button>`;
                     }
                 })()}
                     </div>
@@ -442,6 +452,11 @@ async function triggerResumeSearch(filename) {
             body: JSON.stringify(payload)
         });
         if (!res.ok) throw new Error((await res.json()).detail);
+
+        // Restart Polling implicitly?
+        // Actually, if we stopped polling because of COMPLETED, we need to restart it here.
+        if (dashboardPollInterval) clearInterval(dashboardPollInterval);
+        dashboardPollInterval = setInterval(() => checkDashboardStatuses(), 4000);
 
         refreshModalStatus(filename);
 
