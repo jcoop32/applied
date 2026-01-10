@@ -541,10 +541,11 @@ async function initProfilePage() {
 
     // Make applyToJob global
     window.applyToJob = async (btn, url, resume) => {
-        if (!confirm("Start background application logic for this job? (Headless Mode)")) return;
-
+        // Optimistic UI Update
+        const originalText = btn.textContent;
         btn.disabled = true;
-        btn.textContent = "🚀 Sending...";
+        btn.textContent = "⏳ Application in Progress...";
+        btn.style.opacity = "0.8";
 
         try {
             const res = await fetch('/api/agents/apply', {
@@ -552,14 +553,34 @@ async function initProfilePage() {
                 headers: { ...headers, 'Content-Type': 'application/json' },
                 body: JSON.stringify({ job_url: url, resume_filename: resume })
             });
-            if (!res.ok) throw new Error((await res.json()).detail);
 
-            btn.textContent = "✅ Started";
-            // Check status logic could be complex (another poller?), for now just fire-and-forget UI
+            if (!res.ok) {
+                const errData = await res.json();
+                throw new Error(errData.detail || "Request failed");
+            }
+
+            // Success State
+            btn.textContent = "✅ Application Started";
+            btn.style.background = "var(--success, #4ade80)";
+            btn.style.color = "black";
+            // Optional: Reload status after a delay?
+            setTimeout(() => {
+                if (currentModalResume) refreshModalStatus(currentModalResume);
+            }, 2000);
+
         } catch (e) {
             alert("Apply Failed: " + e.message);
-            btn.textContent = "❌ Failed";
+            console.error(e);
+
+            // Revert state on failure
+            btn.textContent = "❌ Failed (Retry)";
+            btn.style.background = "#f87171";
             btn.disabled = false;
+
+            setTimeout(() => {
+                btn.textContent = "⚡ Quick Apply"; // Or originalText
+                btn.style.background = "";
+            }, 3000);
         }
     };
 

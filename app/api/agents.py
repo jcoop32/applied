@@ -183,6 +183,9 @@ async def trigger_apply(
         profile_blob['full_name'] = user_data.get('full_name')
 
     user_id = current_user['id']
+    
+    # IMMEDIATE STATUS UPDATE: Mark as IN_PROGRESS so UI reflects it immediately
+    supabase_service.update_lead_status_by_url(user_id, job_url, "IN_PROGRESS")
 
     if USE_GITHUB_ACTIONS:
         action_payload = {
@@ -194,10 +197,16 @@ async def trigger_apply(
         success = await dispatch_github_action("apply", action_payload)
         if success:
              return {"message": "Application started (GitHub Action)"}
+        else:
+             logger.error("❌ Failed to dispatch GitHub Action for Apply. Falling back to local/background task if key available.")
 
     # Construct resume path (temp download needed? Applier handles local path logic)
     # The ApplierAgent.apply methods expects a LOCAL file path.
     # We need to download it first or let Applier handle it.
+    
+    if not api_key:
+        # If we failed GH action AND no API key, we can't do anything.
+        raise HTTPException(status_code=500, detail="Failed to start application agent (No GH Token & No API Key)")
 
     # If local fallback:
     async def _download_and_apply():
@@ -219,6 +228,8 @@ async def trigger_apply(
 
         except Exception as e:
             print(f"❌ Apply Wrapper Failed: {e}")
+            # Try to revert status if possible?
+            supabase_service.update_lead_status_by_url(user_id, job_url, "FAILED")
 
     background_tasks.add_task(_download_and_apply)
 

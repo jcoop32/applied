@@ -156,10 +156,12 @@ async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, a
     
     lead_id = None
     if user_id:
+        # Use new method that handles fetch properly
         lead = supabase_service.get_lead_by_url(user_id, job_url)
         if lead:
             lead_id = lead['id']
             print(f"📋 Found Lead ID: {lead_id}")
+            # Use specific ID update
             supabase_service.update_lead_status(lead_id, "APPLYING")
         else:
             print("⚠️ Could not find existing lead for this URL. Status updates will be skipped.")
