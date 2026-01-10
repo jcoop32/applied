@@ -195,6 +195,55 @@ window.deleteResume = async function (filename) {
 
 // --- Dashboard Agent Logic (Resume Details Modal) ---
 
+// Make applyToJob global (Moved from Profile Page)
+window.applyToJob = async (btn, url, resume) => {
+    const headers = getAuthHeaders();
+    if (!headers) return;
+
+    // Optimistic UI Update
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "⏳ Application in Progress...";
+    btn.style.opacity = "0.8";
+
+    try {
+        const res = await fetch('/api/agents/apply', {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ job_url: url, resume_filename: resume })
+        });
+
+        if (!res.ok) {
+            const errData = await res.json();
+            throw new Error(errData.detail || "Request failed");
+        }
+
+        // Success State
+        btn.textContent = "✅ Application Started";
+        btn.style.background = "var(--success, #4ade80)";
+        btn.style.color = "black";
+        // Optional: Reload status after a delay?
+        setTimeout(() => {
+            if (currentModalResume) refreshModalStatus(currentModalResume);
+        }, 2000);
+
+    } catch (e) {
+        alert("Apply Failed: " + e.message);
+        console.error(e);
+
+        // Revert state on failure
+        btn.textContent = "❌ Failed (Retry)";
+        btn.style.background = "#f87171";
+        btn.disabled = false;
+
+        setTimeout(() => {
+            btn.textContent = "⚡ Quick Apply"; // Or originalText
+            btn.style.background = "";
+        }, 3000);
+    }
+};
+
+
 let currentModalResume = null;
 let dashboardPollInterval = null;
 
@@ -539,50 +588,7 @@ async function initProfilePage() {
     if (addEduBtn) addEduBtn.onclick = () => addEducationItem();
 
 
-    // Make applyToJob global
-    window.applyToJob = async (btn, url, resume) => {
-        // Optimistic UI Update
-        const originalText = btn.textContent;
-        btn.disabled = true;
-        btn.textContent = "⏳ Application in Progress...";
-        btn.style.opacity = "0.8";
 
-        try {
-            const res = await fetch('/api/agents/apply', {
-                method: 'POST',
-                headers: { ...headers, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ job_url: url, resume_filename: resume })
-            });
-
-            if (!res.ok) {
-                const errData = await res.json();
-                throw new Error(errData.detail || "Request failed");
-            }
-
-            // Success State
-            btn.textContent = "✅ Application Started";
-            btn.style.background = "var(--success, #4ade80)";
-            btn.style.color = "black";
-            // Optional: Reload status after a delay?
-            setTimeout(() => {
-                if (currentModalResume) refreshModalStatus(currentModalResume);
-            }, 2000);
-
-        } catch (e) {
-            alert("Apply Failed: " + e.message);
-            console.error(e);
-
-            // Revert state on failure
-            btn.textContent = "❌ Failed (Retry)";
-            btn.style.background = "#f87171";
-            btn.disabled = false;
-
-            setTimeout(() => {
-                btn.textContent = "⚡ Quick Apply"; // Or originalText
-                btn.style.background = "";
-            }, 3000);
-        }
-    };
 
     // 1. Fetch Profile Data
     try {

@@ -25,13 +25,12 @@ GITHUB_REPO_OWNER = os.getenv("GITHUB_REPO_OWNER")
 GITHUB_REPO_NAME = os.getenv("GITHUB_REPO_NAME")
 USE_GITHUB_ACTIONS = os.getenv("USE_GITHUB_ACTIONS", "true").lower() == "true"
 
-async def dispatch_github_action(task: str, payload: dict):
+async def dispatch_github_action(workflow_file: str, task: str, payload: dict):
     if not GITHUB_TOKEN or not GITHUB_REPO_OWNER or not GITHUB_REPO_NAME:
         logger.warning("GitHub configuration missing. Falling back to local execution (if applicable) or failing.")
-        # If we want fallback, we need to handle it. For now, assuming user set configs.
         return False
 
-    url = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/actions/workflows/agent_runner.yml/dispatches"
+    url = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/actions/workflows/{workflow_file}/dispatches"
     headers = {
         "Authorization": f"Bearer {GITHUB_TOKEN}",
         "Accept": "application/vnd.github.v3+json"
@@ -49,7 +48,7 @@ async def dispatch_github_action(task: str, payload: dict):
     async with httpx.AsyncClient() as client:
         response = await client.post(url, headers=headers, json=data)
         if response.status_code != 204:
-            logger.error(f"Failed to dispatch GitHub Action: {response.text}")
+            logger.error(f"Failed to dispatch GitHub Action {workflow_file}: {response.text}")
             return False
 
     return True
@@ -76,14 +75,9 @@ async def trigger_research(
         raise HTTPException(status_code=400, detail="resume_filename is required")
 
     api_key = os.getenv("GEMINI_API_KEY")
-    # If using GitHub Actions, the SERVER doesn't strictly need the key, but the ACTION does.
-    # However, we still might check it for config health or local fallback.
-
     user_id = current_user['id']
 
     # Update status to SEARCHING immediately for UI responsiveness
-    # The Action will also update it, but there might be a delay in dispatch.
-    # We need to import update_research_status to do this locally.
     update_research_status(user_id, resume_filename, "SEARCHING")
 
     # Dispatch
@@ -95,7 +89,7 @@ async def trigger_research(
             "job_title": job_title,
             "location": location
         }
-        success = await dispatch_github_action("research", action_payload)
+        success = await dispatch_github_action("research_agent.yml", "research", action_payload)
 
         if success:
             return {"message": "Research started (GitHub Action)", "status": "SEARCHING"}
@@ -194,7 +188,7 @@ async def trigger_apply(
             "resume_filename": resume_filename,
             "user_profile": profile_blob
         }
-        success = await dispatch_github_action("apply", action_payload)
+        success = await dispatch_github_action("apply_agent.yml", "apply", action_payload)
         if success:
              return {"message": "Application started (GitHub Action)"}
         else:

@@ -1,0 +1,62 @@
+name: Apply Agent
+
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: 'Task to run (apply)'
+        required: true
+        default: 'apply'
+        type: string
+      payload:
+        description: 'JSON Payload'
+        required: true
+        type: string
+
+jobs:
+  run-agent:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Get installed Playwright version
+      id: playwright-version
+      run: echo "PLAYWRIGHT_VERSION=$(python -c "import importlib.metadata; print(importlib.metadata.version('playwright'))")" >> $GITHUB_ENV
+
+    - name: Cache Playwright browsers
+      uses: actions/cache@v3
+      id: playwright-cache
+      with:
+        path: ~/.cache/ms-playwright
+        key: ${{ runner.os }}-playwright-${{ env.PLAYWRIGHT_VERSION }}
+        restore-keys: |
+          ${{ runner.os }}-playwright-
+
+    - name: Install Playwright browsers
+      if: steps.playwright-cache.outputs.cache-hit != 'true'
+      run: playwright install chromium
+
+    - name: Install Playwright deps
+      if: steps.playwright-cache.outputs.cache-hit != 'true'
+      run: playwright install-deps chromium
+
+    - name: Run Apply Task
+      env:
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      run: |
+        python -m app.cli --task apply --payload '${{ inputs.payload }}'
