@@ -377,10 +377,14 @@ class ApplierAgent:
 
             # Save generated credentials if we created an account
             if result_data.get("status") == "APPLIED" or account_created:
-                 from app.services.supabase_client import supabase_service
                  if supabase_service:
                      print(f"✅ Marking lead as APPLIED: {resolved_url}")
-                     supabase_service.update_lead_status(user_id, job_url, "APPLIED")
+                     if lead_id:
+                         supabase_service.update_lead_status(lead_id, "APPLIED")
+                     else:
+                         u_id = profile.get('user_id') or profile.get('id')
+                         if u_id:
+                             supabase_service.update_lead_status_by_url(u_id, job_url, "APPLIED")
 
             return str(status)
 
