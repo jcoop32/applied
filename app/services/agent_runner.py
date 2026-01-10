@@ -169,7 +169,9 @@ async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, a
         print("⚠️ No User ID found in profile. Cannot resolve lead.")
 
     try:
-        applier = ApplierAgent(api_key=api_key)
+        # Detect environment for headless mode
+        is_headless = os.getenv("HEADLESS", "false").lower() == "true" or os.getenv("GITHUB_ACTIONS") == "true"
+        applier = ApplierAgent(api_key=api_key, headless=is_headless)
         # Pass lead_id to apply method
         result_status = await applier.apply(job_url, user_profile, resume_path, lead_id=lead_id)
         
