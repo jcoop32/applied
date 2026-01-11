@@ -116,7 +116,10 @@
                         <input type="number" id="job-limit-input" value="20" min="1" max="99"
                             style="width:50px; padding:5px; border-radius:4px; border:1px solid #444; background:rgba(0,0,0,0.3); color:white;">
                     </div>
-                    <button id="modal-btn-find-jobs" class="btn-primary">🔍 Find Jobs</button>
+                    <button id="modal-btn-find-getwork" class="btn-secondary" title="Standard Broad Search">🔍
+                        Standard</button>
+                    <button id="modal-btn-find-google" class="btn-primary" title="Verified ATS Search">✅
+                        Verified</button>
                     <button id="modal-btn-filter" class="btn-secondary" title="Manual Search Filters"
                         style="padding: 6px 10px; font-size: 0.9rem;">⚙️</button>
                     <a id="modal-btn-view-file" href="#" target="_blank" class="btn-secondary">📄 View PDF</a>
@@ -141,27 +144,18 @@
                             style="padding: 8px; border-radius: 4px; border: 1px solid #444; background: rgba(0,0,0,0.3); color: white;">
                     </div>
                 </div>
-                <div style="display: flex; flex-direction: column; gap: 5px; margin-top: 15px;">
-                    <label style="font-size: 0.8rem; color: var(--text-secondary);">Search Strategy</label>
-                    <select id="researcher-type"
-                        style="padding: 8px; border-radius: 4px; border: 1px solid #444; background: rgba(0,0,0,0.3); color: white;">
-                        <option value="getwork">Standard (Broad Search - GetWork)</option>
-                        <option value="google">Verified (Direct ATS Only - Google)</option>
-                    </select>
+            </div>
+
+            <!-- Content Area (Scrollable) -->
+            <div id="modal-matches-list"
+                style="flex-grow: 1; overflow-y: auto; display: grid; gap: 15px; align-content: start;">
+                <!-- Matches injected here -->
+                <div style="text-align: center; color: var(--text-secondary); margin-top: 50px;">
+                    <p>No jobs found yet.</p>
                 </div>
             </div>
-        </div>
 
-        <!-- Content Area (Scrollable) -->
-        <div id="modal-matches-list"
-            style="flex-grow: 1; overflow-y: auto; display: grid; gap: 15px; align-content: start;">
-            <!-- Matches injected here -->
-            <div style="text-align: center; color: var(--text-secondary); margin-top: 50px;">
-                <p>No jobs found yet.</p>
-            </div>
         </div>
-
-    </div>
     </div>
 
     <script src="/script.js"></script>

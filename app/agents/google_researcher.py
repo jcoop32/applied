@@ -80,7 +80,7 @@ class GoogleResearcherAgent:
             for title in cleaned_titles:
                 # We'll search for the title + location is handled usually by the user or implicit?
                 # Let's add location if it exists in profile
-                loc = profile.get('location', 'Remote')
+                loc = profile.get('location', '')
                 
                 # Query 1: Group A
                 queries.append(f"({ats_group_1}) \"{title}\" {loc}")
@@ -165,7 +165,10 @@ class GoogleResearcherAgent:
                 except Exception as e:
                     print(f"   ❌ Error on {query}: {e}")
                 finally:
-                    await browser.close()
+                    try:
+                        await browser.close()
+                    except:
+                        pass
                 
                 return query_leads
 

@@ -369,8 +369,8 @@ async function refreshModalStatus(filename) {
         } else {
             btnGetWork.disabled = false;
             btnGoogle.disabled = false;
-            btnGetWork.textContent = "🔍 Standard";
-            btnGoogle.textContent = "✅ Verified";
+            btnGetWork.textContent = "🔍 GetWork";
+            btnGoogle.textContent = "✅ Google Search";
         }
 
         // Render Matches
@@ -502,8 +502,8 @@ async function triggerResumeSearch(filename, type) {
         alert("Error: " + e.message);
         btnGetWork.disabled = false;
         btnGoogle.disabled = false;
-        btnGetWork.textContent = "🔍 Standard";
-        btnGoogle.textContent = "✅ Verified";
+        btnGetWork.textContent = "🔍 GetWork";
+        btnGoogle.textContent = "✅ Google Search";
     }
 }
 
