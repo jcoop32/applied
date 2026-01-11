@@ -129,16 +129,17 @@ class GoogleResearcherAgent:
                 
                 browser = Browser(headless=True)
                 try:
-                    # Construct Direct URL (Using Bing to avoid Google CAPTCHA)
+                    # Construct Direct URL (Using DuckDuckGo to avoid Google/Bing CAPTCHAs)
                     encoded_q = urllib.parse.quote(query)
-                    url = f"https://www.bing.com/search?q={encoded_q}&rdr=1" 
+                    url = f"https://duckduckgo.com/?q={encoded_q}&t=h_&ia=web" 
 
-                    # We instruct the agent to use Bing
+                    # We instruct the agent to use DuckDuckGo
                     task_prompt = (
                         f"Go to {url} . "
                         f"Extract the TOP 5 organic search results only. "
                         f"For each result, try to parse the 'Company' from the title or URL. "
                         f"Return a strict JSON object: {{'jobs': [{{'title': '...', 'company': '...', 'url': '...', 'snippet': '...'}}]}}. "
+                        f"CRITICAL: If you see a CAPTCHA, Cloudflare, or 'Verify you are human' screen, STOP IMMEDIATELY and return {{'jobs': []}}. Do not try to solve it. "
                         f"Keep snippets short (max 20 words). Directly from the page. Do not click."
                     )
                     
