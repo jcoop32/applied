@@ -129,17 +129,17 @@ class GoogleResearcherAgent:
                 
                 browser = Browser(headless=True)
                 try:
-                    # Construct Direct URL
+                    # Construct Direct URL (Using Bing to avoid Google CAPTCHA)
                     encoded_q = urllib.parse.quote(query)
-                    url = f"https://www.google.com/search?q={encoded_q}&num=15&hl=en" # num=15 to get enough results, hl=en to force English
+                    url = f"https://www.bing.com/search?q={encoded_q}&rdr=1" 
 
-                    # We instruct the agent to use Google
+                    # We instruct the agent to use Bing
                     task_prompt = (
                         f"Go to {url} . "
-                        f"Extract all organic search results (ignore sponsored if possible). "
+                        f"Extract the TOP 5 organic search results only. "
                         f"For each result, try to parse the 'Company' from the title or URL. "
                         f"Return a strict JSON object: {{'jobs': [{{'title': '...', 'company': '...', 'url': '...', 'snippet': '...'}}]}}. "
-                        f"Directly from the search results page. Do not click into them."
+                        f"Keep snippets short (max 20 words). Directly from the page. Do not click."
                     )
                     
                     # Disable vision to speed up and avoid screenshot timeouts
