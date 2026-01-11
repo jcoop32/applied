@@ -113,7 +113,7 @@ class GoogleResearcherAgent:
         max_per_query = math.ceil(limit / max(len(queries), 1)) + 2
 
         # Parallel Execution
-        concurrency = 3
+        concurrency = 1
         semaphore = asyncio.Semaphore(concurrency)
 
         async def process_query(query: str):
