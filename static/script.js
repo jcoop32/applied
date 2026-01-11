@@ -276,7 +276,13 @@ window.openResumeDetails = async (filename, fileUrl, jobCount = 0) => {
     // Reset state
     statusDiv.textContent = "Checking status...";
     // listDiv.innerHTML = '<p style="text-align:center; color:var(--text-secondary);">Loading...</p>';
-    findBtn.onclick = () => triggerResumeSearch(filename);
+
+    // Bind both buttons
+    const btnGetWork = document.getElementById('modal-btn-find-getwork');
+    const btnGoogle = document.getElementById('modal-btn-find-google');
+
+    btnGetWork.onclick = () => triggerResumeSearch(filename, 'getwork');
+    btnGoogle.onclick = () => triggerResumeSearch(filename, 'google');
 
     // Fetch initial status & matches
     await refreshModalStatus(filename);
@@ -352,12 +358,19 @@ async function refreshModalStatus(filename) {
         statusDiv.textContent = statusText;
 
         // Update Button State
+        const btnGetWork = document.getElementById('modal-btn-find-getwork');
+        const btnGoogle = document.getElementById('modal-btn-find-google');
+
         if (state === 'SEARCHING') {
-            findBtn.disabled = true;
-            findBtn.textContent = "⏳ Working...";
+            btnGetWork.disabled = true;
+            btnGoogle.disabled = true;
+            btnGoogle.textContent = "⏳ Working...";
+            // Maybe just dim them?
         } else {
-            findBtn.disabled = false;
-            findBtn.textContent = (state === 'COMPLETED') ? "➕ Find More Jobs" : "🔍 Find Jobs";
+            btnGetWork.disabled = false;
+            btnGoogle.disabled = false;
+            btnGetWork.textContent = "🔍 Standard";
+            btnGoogle.textContent = "✅ Verified";
         }
 
         // Render Matches
@@ -369,7 +382,21 @@ async function refreshModalStatus(filename) {
                         <span style="font-size:0.8rem; background:rgba(255,255,255,0.1); padding:2px 6px; border-radius:4px;">${m.match_score}% Match</span>
                     </div>
                     <div style="font-size:0.9rem; color:var(--text-secondary); margin-bottom:10px;">
-                        ${m.company} • ${m.query_source || 'Search'} • <span style="font-size:0.8rem; opacity:0.8;">Added: ${m.created_at ? new Date(m.created_at).toLocaleDateString() : 'Recently'}</span>
+                        ${(() => {
+                    const rawSource = m.query_source || '';
+                    let badge = '<span style="background:rgba(255,255,255,0.1); padding:2px 6px; border-radius:4px; font-size:0.7rem;">🔍 Standard</span>';
+                    let query = rawSource;
+
+                    if (rawSource.startsWith('GOOGLE|')) {
+                        badge = '<span style="background:#4ade80; color:black; padding:2px 6px; border-radius:4px; font-size:0.7rem; font-weight:bold;">✅ Google Verified</span>';
+                        query = rawSource.replace('GOOGLE|', '');
+                    } else if (rawSource.startsWith('GETWORK|')) {
+                        badge = '<span style="background:rgba(255,255,255,0.1); padding:2px 6px; border-radius:4px; font-size:0.7rem;">🔍 GetWork</span>';
+                        query = rawSource.replace('GETWORK|', '');
+                    }
+                    return `${badge} <span style="font-size:0.8rem; opacity:0.8; margin-left:5px;">Source: ${query}</span>`;
+                })()}
+                         • <span style="font-size:0.8rem; opacity:0.8;">Added: ${m.created_at ? new Date(m.created_at).toLocaleDateString() : 'Recently'}</span>
                     </div>
                     <p style="font-size:0.85rem; margin-bottom:10px; color: #ddd;">
                         ${m.match_reason || ''}
@@ -409,9 +436,12 @@ async function refreshModalStatus(filename) {
 }
 
 
-async function triggerResumeSearch(filename) {
-    console.log("👉 TriggerResumeSearch Clicked", filename);
-    const findBtn = document.getElementById('modal-btn-find-jobs');
+async function triggerResumeSearch(filename, type) {
+    console.log("👉 TriggerResumeSearch Clicked", filename, type);
+
+    const btnGetWork = document.getElementById('modal-btn-find-getwork');
+    const btnGoogle = document.getElementById('modal-btn-find-google');
+
     const limitInput = document.getElementById('job-limit-input');
     const limit = limitInput ? parseInt(limitInput.value, 10) : 20;
 
@@ -424,8 +454,15 @@ async function triggerResumeSearch(filename) {
     const job_title = jobTitleInput ? jobTitleInput.value.trim() : "";
     const location = locationInput ? locationInput.value.trim() : "";
 
-    findBtn.disabled = true;
-    findBtn.textContent = "🚀 Starting...";
+    // Disable both
+    btnGetWork.disabled = true;
+    btnGoogle.disabled = true;
+
+    if (type === 'google') {
+        btnGoogle.textContent = "🚀 Starting...";
+    } else {
+        btnGetWork.textContent = "🚀 Starting...";
+    }
 
     // Hide inputs to provide "sent" feedback
     const inputContainer = document.getElementById('manual-search-inputs');
@@ -440,7 +477,8 @@ async function triggerResumeSearch(filename) {
     try {
         const payload = {
             resume_filename: filename,
-            limit: limit
+            limit: limit,
+            researcher_type: type
         };
         // Add manual overrides if present
         if (job_title) payload.job_title = job_title;
@@ -462,8 +500,10 @@ async function triggerResumeSearch(filename) {
 
     } catch (e) {
         alert("Error: " + e.message);
-        findBtn.disabled = false;
-        findBtn.textContent = "🔍 Find Jobs";
+        btnGetWork.disabled = false;
+        btnGoogle.disabled = false;
+        btnGetWork.textContent = "🔍 Standard";
+        btnGoogle.textContent = "✅ Verified";
     }
 }
 

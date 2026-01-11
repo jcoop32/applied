@@ -1,0 +1,184 @@
+import json
+import asyncio
+import urllib.parse
+import re
+import math
+import random
+from typing import List, Set, Dict, Any
+from google import genai
+from browser_use import Agent, Browser
+from browser_use.llm import ChatGoogle
+
+class GoogleResearcherAgent:
+    def __init__(self, api_key: str):
+        self.client = genai.Client(api_key=api_key)
+        self.api_key = api_key
+        self.model_id = 'gemini-2.5-flash'
+        self.llm = ChatGoogle(model='gemini-2.5-flash', api_key=api_key)
+        self.seen_jobs: Set[str] = set()
+        
+        # Valid ATS Domains to target for "Verified" jobs
+        self.ats_domains = [
+            "boards.greenhouse.io",
+            "jobs.lever.co",
+            "myworkdayjobs.com",
+            "jobs.ashbyhq.com",
+            "jobs.jobvite.com", 
+            "careers.smartrecruiters.com"
+        ]
+
+        # Suppress verbose browser-use logs
+        import logging
+        logging.getLogger("browser_use").setLevel(logging.WARNING)
+
+    async def generate_strategy(self, profile: dict) -> List[str]:
+        """
+        Generates Google Search queries targeting specific ATS domains.
+        """
+        print("🧠 GoogleResearcher: Generating Verified ATS Search Strategy...")
+
+        if not profile:
+            return ["site:boards.greenhouse.io Software Engineer"]
+
+        # We'll ask the LLM to just give us the Job Titles, then we wrap them in site: operators logic manually
+        # This ensures we control the 'verification' part better.
+        prompt = f"""
+        Act as an expert Recruiter. Analyze this candidate profile:
+        {json.dumps(profile, indent=2)}
+
+        Task:
+        1. Identify the candidate's core Role Name (e.g. "Software Engineer", "Product Manager").
+        2. Identify their Level (Senior, Staff, Intern, etc).
+        3. Generate 5 distinct, professional Job Titles they should target.
+        
+        Output ONLY a JSON list of strings (e.g. ["Senior Software Engineer", "Backend Developer"]).
+        """
+
+        try:
+            response = self.client.models.generate_content(
+                model=self.model_id,
+                contents=prompt,
+                config={'response_mime_type': 'application/json'}
+            )
+            titles = json.loads(response.text)
+            
+            # Clean titles
+            cleaned_titles = []
+            for t in titles:
+                 clean = re.sub(r'[()\"\'\[\]]', '', t).strip()
+                 if clean: cleaned_titles.append(clean)
+            
+            # Now combine with ATS domains to make robust queries
+            # We don't want to make 5 titles * 6 domains = 30 queries. That's too many.
+            # Strategy: Group domains or rotate them? 
+            # Better: "site:greenhouse.io OR site:lever.co OR ... " (Google allows ~32 words)
+            
+            ats_group_1 = " OR ".join([f"site:{d}" for d in self.ats_domains[:3]])
+            ats_group_2 = " OR ".join([f"site:{d}" for d in self.ats_domains[3:]])
+            
+            queries = []
+            for title in cleaned_titles:
+                # We'll search for the title + location is handled usually by the user or implicit?
+                # Let's add location if it exists in profile
+                loc = profile.get('location', 'Remote')
+                
+                # Query 1: Group A
+                queries.append(f"({ats_group_1}) \"{title}\" {loc}")
+                # Query 2: Group B
+                queries.append(f"({ats_group_2}) \"{title}\" {loc}")
+            
+            # Shuffle and pick top X to avoid overload? 
+            # For now, let's take up to 8 queries total
+            random.shuffle(queries)
+            return queries[:8]
+
+        except Exception as e:
+            print(f"⚠️ Strategy Generation Error: {e}")
+            return [f"site:boards.greenhouse.io Software Engineer"]
+
+    async def gather_leads(self, profile: dict, limit: int = 100, job_title: str = None, location: str = None) -> List[Dict[str, Any]]:
+        """
+        Executes Google Search queries to find direct ATS links.
+        """
+        queries = await self.generate_strategy(profile)
+        
+        # Override if manual title provided (for testing)
+        if job_title:
+             # Basic override logic
+             ats_group = " OR ".join([f"site:{d}" for d in self.ats_domains])
+             loc = location if location else profile.get('location', '')
+             queries = [f"({ats_group}) \"{job_title}\" {loc}"]
+
+        all_leads = []
+        max_per_query = math.ceil(limit / max(len(queries), 1)) + 2
+
+        # Parallel Execution
+        concurrency = 3
+        semaphore = asyncio.Semaphore(concurrency)
+
+        async def process_query(query: str):
+            async with semaphore:
+                if len(all_leads) >= limit: return []
+                
+                print(f"🔎 Google Search: '{query}'")
+                query_leads = []
+
+                # Just page 1 for now on Google (approx 10 results)
+                # Google URLs are complex, let's use the Browser Agent to "Search Google for X" naturally
+                # instead of trying to reverse-engineer the ?q= URL perfectly with headers.
+                
+                browser = Browser(headless=True)
+                try:
+                    # We instruct the agent to use Google
+                    task_prompt = (
+                        f"Go to google.com and search for: {query} . "
+                        f"Extract all organic search results (ignore sponsored if possible). "
+                        f"For each result, try to parse the 'Company' from the title or URL. "
+                        f"Return a JSON object: {{'jobs': [{{'title': '...', 'company': '...', 'url': '...', 'snippet': '...'}}]}}. "
+                        f"Directly from the search results page. Do not click into them."
+                    )
+                    
+                    agent = Agent(task=task_prompt, llm=self.llm, browser=browser)
+                    history = await agent.run()
+                    
+                    raw = history.final_result() or ""
+                    
+                    # Same JSON extraction logic as ResearcherAgent
+                    # (Refactor this to a util later?)
+                    json_blocks = re.findall(r'```json\s*(.*?)```', raw, re.DOTALL)
+                    if not json_blocks:
+                         match = re.search(r'\{.*"jobs":\s*\[.*\]\s*\}', raw, re.DOTALL)
+                         if match: json_blocks = [match.group(0)]
+                    
+                    for block in json_blocks:
+                        try:
+                            data = json.loads(block.strip())
+                            jobs = data.get('jobs', [])
+                            for j in jobs:
+                                # Validation: Must be from our ATS list?
+                                url = j.get('url', '')
+                                if any(d in url for d in self.ats_domains):
+                                    query_leads.append({**j, 'is_direct_listing': True, 'query_source': query})
+                        except:
+                            pass
+
+                except Exception as e:
+                    print(f"   ❌ Error on {query}: {e}")
+                finally:
+                    await browser.close()
+                
+                return query_leads
+
+        tasks = [process_query(q) for q in queries]
+        results = await asyncio.gather(*tasks)
+
+        for res in results:
+            for lead in res:
+                # Deduplicate
+                # Use URL as primary key for direct ATS links
+                sig = lead.get('url', '').lower()
+                if sig and sig not in self.seen_jobs:
+                    self.seen_jobs.add(sig)
+                    all_leads.append(lead)
+        
+        return all_leads[:limit]

@@ -5,6 +5,7 @@ import logging
 import asyncio
 from app.services.supabase_client import supabase_service
 from app.agents.researcher import ResearcherAgent
+from app.agents.google_researcher import GoogleResearcherAgent
 from app.agents.matcher import MatcherAgent
 from app.agents.applier import ApplierAgent
 
@@ -35,8 +36,8 @@ def update_research_status(user_id: int, resume_filename: str, status: str):
         logger.error(f"Failed to update research status: {e}")
 
 
-async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str, limit: int = 20, job_title: str = None, location: str = None):
-    print(f"🕵️ Worker: Starting Research for {resume_filename} with limit {limit}...")
+async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str, limit: int = 20, job_title: str = None, location: str = None, researcher_type: str = "getwork"):
+    print(f"🕵️ Worker: Starting Research for {resume_filename} with limit {limit} (Type: {researcher_type})...")
     update_research_status(user_id, resume_filename, "SEARCHING")
 
     try:
@@ -96,9 +97,20 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
         print(f"📄 Parsed Profile for {resume_filename}: {profile_blob.get('full_name', 'Unknown')}")
 
         # 3. Research
-        researcher = ResearcherAgent(api_key=api_key)
+        if researcher_type == "google":
+             print("🔎 Using Google Verification Agent...")
+             researcher = GoogleResearcherAgent(api_key=api_key)
+        else:
+             print("🔎 Using Standard GetWork Agent...")
+             researcher = ResearcherAgent(api_key=api_key)
+             
         # We use the DYNAMIC profile_blob here
         leads = await researcher.gather_leads(profile_blob, limit=limit, job_title=job_title, location=location)
+
+        # Prefix query_source for UI identification
+        prefix = "GOOGLE" if researcher_type == "google" else "GETWORK"
+        for lead in leads:
+            lead['query_source'] = f"{prefix}|{lead.get('query_source', 'Unknown')}"
 
         # 4. Match
         matcher = MatcherAgent(api_key=api_key)

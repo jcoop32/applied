@@ -66,6 +66,7 @@ async def trigger_research(
     limit = payload.get("limit", 20)
     job_title = payload.get("job_title") # Optional Manual Override
     location = payload.get("location")   # Optional Manual Override
+    researcher_type = payload.get("researcher_type", "getwork")
 
     # Cap limit
     if limit > 99: limit = 99
@@ -87,7 +88,8 @@ async def trigger_research(
             "resume_filename": resume_filename,
             "limit": limit,
             "job_title": job_title,
-            "location": location
+            "location": location,
+            "researcher_type": researcher_type
         }
         success = await dispatch_github_action("research_agent.yml", "research", action_payload)
 
@@ -108,7 +110,8 @@ async def trigger_research(
         api_key=api_key,
         limit=limit,
         job_title=job_title,
-        location=location
+        location=location,
+        researcher_type=researcher_type
     )
 
     return {"message": "Research started (Local)", "status": "SEARCHING"}
