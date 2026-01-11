@@ -129,16 +129,21 @@ class GoogleResearcherAgent:
                 
                 browser = Browser(headless=True)
                 try:
+                    # Construct Direct URL
+                    encoded_q = urllib.parse.quote(query)
+                    url = f"https://www.google.com/search?q={encoded_q}&num=15&hl=en" # num=15 to get enough results, hl=en to force English
+
                     # We instruct the agent to use Google
                     task_prompt = (
-                        f"Go to google.com and search for: {query} . "
+                        f"Go to {url} . "
                         f"Extract all organic search results (ignore sponsored if possible). "
                         f"For each result, try to parse the 'Company' from the title or URL. "
-                        f"Return a JSON object: {{'jobs': [{{'title': '...', 'company': '...', 'url': '...', 'snippet': '...'}}]}}. "
+                        f"Return a strict JSON object: {{'jobs': [{{'title': '...', 'company': '...', 'url': '...', 'snippet': '...'}}]}}. "
                         f"Directly from the search results page. Do not click into them."
                     )
                     
-                    agent = Agent(task=task_prompt, llm=self.llm, browser=browser)
+                    # Disable vision to speed up and avoid screenshot timeouts
+                    agent = Agent(task=task_prompt, llm=self.llm, browser=browser, use_vision=False)
                     history = await agent.run()
                     
                     raw = history.final_result() or ""
