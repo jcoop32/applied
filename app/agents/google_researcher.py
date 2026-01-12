@@ -132,18 +132,19 @@ class GoogleResearcherAgent:
         concurrency = 1
         semaphore = asyncio.Semaphore(concurrency)
         
-
+        # Configure browser with stealth args and timeout
+        browser_user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 
         try:
             async def process_query(query: str):
                 async with semaphore:
                     if len(all_leads) >= limit: return []
                     
-                    print(f"🔎 DuckDuckGo: '{query}'")
+                    print(f"🔎 DuckDuckGo Lite: '{query}'")
                     query_leads = []
                     
                     try:
-                        # Construct Direct URL (Using DuckDuckGo)
+                        # Construct Direct URL (Standard DuckDuckGo)
                         encoded_q = urllib.parse.quote(query)
                         # Request specific URL to avoid redirects/tracking
                         url = f"https://duckduckgo.com/?q={encoded_q}&t=h_&ia=web" 
@@ -155,30 +156,24 @@ class GoogleResearcherAgent:
                             f"For each result, try to parse the 'Company' from the title or URL. "
                             f"Return a strict JSON object: {{'jobs': [{{'title': '...', 'company': '...', 'url': '...', 'snippet': '...'}}]}}. "
                             f"Keep snippets short (max 20 words). "
-                            f"IMPORTANT: If the page fails to load, shows a CAPTCHA, or times out, RETURN EMPTY JSON {{'jobs': []}} IMMEDIATELY. DO NOT ATTEMPT TO SEARCH AGAIN."
+                            f"If the page loads, extract jobs. Ignore 'page readiness' warnings if content is visible."
                         )
                         
                         # Add random delay to be a good citizen
-                        await asyncio.sleep(random.uniform(1.0, 3.0))
+                        await asyncio.sleep(random.uniform(1.0, 2.0))
 
-                        # Create a fresh browser instance for each query to ensure reliability
-                        # Configure browser with stealth args and timeout
-                        # 4s is too short for search pages, increasing to 30s (30000ms if logic is ms, or it'll be huge seconds which is fine)
-                        # The error '4.0s, 4179ms' suggests internal checks might be comparable.
-                        # Define user_agent explicitly here if needed or reference outer scope
-                        browser_user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-                        
+                        # Instantiate Browser FRESH for this query to avoid CDP errors
                         browser = Browser(
                             headless=True,
                             disable_security=True,
                             args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
                             user_agent=browser_user_agent,
-                            wait_for_network_idle_page_load_time=6.0, # Increase from default ~4s
-                            minimum_wait_page_load_time=2.0 # Wait at least 2s
+                            wait_for_network_idle_page_load_time=5.0, 
+                            minimum_wait_page_load_time=2.0 
                         )
 
                         try:
-                            # Disable vision to speed up and avoid screenshot timeouts
+                            # Use the fresh browser instance
                             agent = Agent(task=task_prompt, llm=self.llm, browser=browser, use_vision=False)
                             history = await agent.run()
                             
@@ -203,8 +198,8 @@ class GoogleResearcherAgent:
                                 except:
                                     pass
                         finally:
-                            if hasattr(browser, 'close'):
-                                await browser.close()
+                           if hasattr(browser, 'close'):
+                               await browser.close()
 
                     except Exception as e:
                         print(f"   ❌ Error on {query}: {e}")
@@ -217,9 +212,7 @@ class GoogleResearcherAgent:
         except Exception as e:
             print(f"❌ Critical Error in Gather: {e}")
             results = []
-
-
-
+        
         for res in results:
             for lead in res:
                 # Deduplicate
