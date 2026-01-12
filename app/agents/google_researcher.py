@@ -42,14 +42,20 @@ class GoogleResearcherAgent:
 
         # We'll ask the LLM to just give us the Job Titles, then we wrap them in site: operators logic manually
         # This ensures we control the 'verification' part better.
+        raw_text_snippet = profile.get('raw_text', '')[:1000] # Give context from raw text
+        
         prompt = f"""
         Act as an expert Recruiter. Analyze this candidate profile:
         {json.dumps(profile, indent=2)}
+        
+        Raw Text Context:
+        {raw_text_snippet}
 
         Task:
-        1. Identify the candidate's core Role Name (e.g. "Software Engineer", "Product Manager").
+        1. Identify the candidate's core Role Name (e.g. "Software Engineer", "Product Manager"). Use STANDARDIZED industry titles, not niche internal ones.
         2. Identify their Level (Senior, Staff, Intern, etc).
-        3. Generate 5 distinct, professional Job Titles they should target.
+        3. Generate 3 distinct, professional Job Titles they should target.
+        4. Titles must be concise (max 4 words). Avoid "Associate" or "II" unless explicitly appropriate.
         
         Output ONLY a JSON list of strings (e.g. ["Senior Software Engineer", "Backend Developer"]).
         """
@@ -139,7 +145,8 @@ class GoogleResearcherAgent:
                         f"Extract the TOP 5 organic search results only. "
                         f"For each result, try to parse the 'Company' from the title or URL. "
                         f"Return a strict JSON object: {{'jobs': [{{'title': '...', 'company': '...', 'url': '...', 'snippet': '...'}}]}}. "
-                        f"Keep snippets short (max 20 words). Directly from the page. Do not click."
+                        f"Keep snippets short (max 20 words). Directly from the page. Do not click. "
+                        f"IMPORTANT: If the page fails to load, shows a 403 Forbidden, or times out, RETURN EMPTY JSON {{'jobs': []}} IMMEDIATELY. DO NOT ATTEMPT TO SEARCH AGAIN."
                     )
                     
                     # Disable vision to speed up and avoid screenshot timeouts
