@@ -9,4 +9,7 @@ services:
     volumes:
       # Mount data for logs or other persistence if needed, but NOT credentials
       - ./data:/app/data
+      - ./static:/app/static
+      - ./templates:/app/templates
+      - ./app:/app/app
     restart: unless-stopped

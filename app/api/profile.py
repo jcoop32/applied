@@ -5,10 +5,44 @@ from app.utils.resume_parser import ResumeParser
 import os
 import json
 import tempfile
+from datetime import datetime
+
 
 
 
 router = APIRouter()
+
+def parse_date_string(date_str):
+    """
+    Parses "Jan 2020", "January 2020", "2020", or "Present"
+    Returns {month, year, is_current}
+    """
+    if not date_str:
+        return {"month": "", "year": ""}
+    
+    date_str = str(date_str).strip()
+    if date_str.lower() in ['present', 'current', 'now']:
+        return {"month": "", "year": "", "is_current": True}
+
+    # Try Month Year (e.g. "Jan 2020", "January 2020")
+    try:
+        dt = datetime.strptime(date_str, "%b %Y")
+        return {"month": dt.strftime("%B"), "year": str(dt.year)}
+    except ValueError:
+        pass
+
+    try:
+        dt = datetime.strptime(date_str, "%B %Y")
+        return {"month": dt.strftime("%B"), "year": str(dt.year)}
+    except ValueError:
+        pass
+
+    # Try just Year (e.g. "2020")
+    if date_str.isdigit() and len(date_str) == 4:
+        return {"month": "", "year": date_str}
+
+    # Fallback/Empty
+    return {"month": "", "year": ""}
 
 # Initialize Parser with Gemini Key
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -126,12 +160,26 @@ async def parse_resume(
         # UI expects: company, title, duration, responsibilities
         raw_exp = parsed_data.get("work_experience", [])
         for item in raw_exp:
-            duration = f"{item.get('start_date', '')} - {item.get('end_date', '')}"
+            start_str = item.get('start_date', '')
+            end_str = item.get('end_date', '')
+            
+            start_p = parse_date_string(start_str)
+            end_p = parse_date_string(end_str)
+            
+            # Construct legacy duration string for backward compatibility
+            duration = f"{start_str} - {end_str}"
+            
             transformed_data["experience"].append({
                 "company": item.get("company", ""),
                 "title": item.get("title", ""),
                 "duration": duration.strip(" - "),
-                "responsibilities": item.get("description", "")
+                "responsibilities": item.get("description", ""),
+                # New Structured Fields
+                "start_month": start_p.get("month", ""),
+                "start_year": start_p.get("year", ""),
+                "end_month": end_p.get("month", ""),
+                "end_year": end_p.get("year", ""),
+                "is_current": end_p.get("is_current", False) or False
             })
 
         # Map Education
@@ -139,10 +187,19 @@ async def parse_resume(
         # UI expects: school, degree, date
         raw_edu = parsed_data.get("education", [])
         for item in raw_edu:
+            grad_year = item.get('graduation_year', '')
+            # Parse graduation year as end_year
+            # Usually strict year "2023"
+            
+            end_p = parse_date_string(grad_year)
+            
             transformed_data["education"].append({
                 "school": item.get("school", ""),
                 "degree": item.get("degree", ""),
-                "date": item.get("graduation_year", "")
+                "date": grad_year,
+                # New Structured Fields
+                "end_year": end_p.get("year", grad_year if grad_year.isdigit() else ""),
+                "end_month": end_p.get("month", "") # Usually empty for grad year
             })
 
         # 6. Auto-Save to Profile

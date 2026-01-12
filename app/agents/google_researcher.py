@@ -139,16 +139,16 @@ class GoogleResearcherAgent:
                 async with semaphore:
                     if len(all_leads) >= limit: return []
                     
-                    print(f"🔎 Brave Search: '{query}'")
+                    print(f"🔎 DuckDuckGo: '{query}'")
                     query_leads = []
                     
                     try:
-                        # Construct Direct URL (Using Brave Search)
+                        # Construct Direct URL (Using DuckDuckGo)
                         encoded_q = urllib.parse.quote(query)
                         # Request specific URL to avoid redirects/tracking
-                        url = f"https://search.brave.com/search?q={encoded_q}" 
+                        url = f"https://duckduckgo.com/?q={encoded_q}&t=h_&ia=web" 
 
-                        # We instruct the agent to use Brave Search
+                        # We instruct the agent to use DuckDuckGo
                         task_prompt = (
                             f"Go to {url} . "
                             f"Extract the TOP 5 search results. "
@@ -163,10 +163,18 @@ class GoogleResearcherAgent:
 
                         # Create a fresh browser instance for each query to ensure reliability
                         # Configure browser with stealth args and timeout
+                        # 4s is too short for search pages, increasing to 30s (30000ms if logic is ms, or it'll be huge seconds which is fine)
+                        # The error '4.0s, 4179ms' suggests internal checks might be comparable.
+                        # Define user_agent explicitly here if needed or reference outer scope
+                        browser_user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+                        
                         browser = Browser(
                             headless=True,
                             disable_security=True,
                             args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+                            user_agent=browser_user_agent,
+                            wait_for_network_idle_page_load_time=6.0, # Increase from default ~4s
+                            minimum_wait_page_load_time=2.0 # Wait at least 2s
                         )
 
                         try:

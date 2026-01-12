@@ -540,6 +540,211 @@ async function initProfilePage() {
         });
     }
 
+    // --- Date Helpers ---
+    const MONTHS = [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+    ];
+
+    const getYearOptions = () => {
+        const currentYear = new Date().getFullYear();
+        const startYear = 1970;
+        const endYear = currentYear + 10;
+        let options = '<option value="">Year</option>';
+        for (let y = endYear; y >= startYear; y--) {
+            options += `<option value="${y}">${y}</option>`;
+        }
+        return options;
+    };
+
+    const getMonthOptions = () => {
+        return '<option value="">Month</option>' + MONTHS.map(m => `<option value="${m}">${m}</option>`).join('');
+    };
+
+    // Helper: Parse string date "Jan 2020" -> {month: "January", year: "2020"}
+    const parseDateString = (str) => {
+        if (!str) return { month: "", year: "" };
+        if (str.toLowerCase() === 'present') return { month: "", year: "", current: true };
+
+        const parts = str.trim().split(' ');
+        if (parts.length === 2) {
+            // Try to match month abbreviation
+            const m = MONTHS.find(mon => mon.toLowerCase().startsWith(parts[0].toLowerCase()));
+            return { month: m || "", year: parts[1] };
+        } else if (parts.length === 1 && /^\d{4}$/.test(parts[0])) {
+            return { month: "", year: parts[0] };
+        }
+        return { month: "", year: "" };
+    };
+
+
+    window.addExperienceItem = (data = {}) => {
+        const container = document.getElementById('experience-container');
+        const div = document.createElement('div');
+        div.className = 'experience-item';
+        div.style = "background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; border: 1px solid var(--glass-border); position: relative;";
+
+        // Parse existing duration string if needed
+        let start = { month: "", year: "" };
+        let end = { month: "", year: "" };
+        let isCurrent = false;
+
+        if (data.duration) {
+            const parts = data.duration.split(' - ');
+            if (parts.length >= 1) start = parseDateString(parts[0]);
+            if (parts.length >= 2) {
+                if (parts[1].toLowerCase() === 'present' || parts[1].toLowerCase() === 'current') {
+                    isCurrent = true;
+                } else {
+                    end = parseDateString(parts[1]);
+                }
+            } else if (data.duration.toLowerCase().includes('present')) {
+                // Fallback for messy strings
+                isCurrent = true;
+            }
+        }
+
+        // Use structure if available (overwrites string parsing)
+        if (data.start_year) start = { month: data.start_month, year: data.start_year };
+        if (data.end_year) end = { month: data.end_month, year: data.end_year };
+        if (data.is_current) isCurrent = true;
+
+        div.innerHTML = `
+            <button type="button" onclick="this.parentElement.remove()" style="position:absolute; top:10px; right:12px; background:transparent; border:none; color:#f87171; cursor:pointer;">✖</button>
+            <div class="form-grid" style="margin-bottom:0;">
+                <div class="form-group">
+                    <label>Company</label>
+                    <input type="text" class="exp-company" value="${data.company || ''}" placeholder="Company Name">
+                </div>
+                <div class="form-group">
+                    <label>Title</label>
+                    <input type="text" class="exp-title" value="${data.title || ''}" placeholder="Job Title">
+                </div>
+                
+                <!-- Date Grid -->
+                <div class="form-group full-width">
+                     <label>Time Period</label>
+                     <div style="display:grid; grid-template-columns: 1fr 1fr 20px 1fr 1fr; gap:10px; align-items:center;">
+                        
+                        <!-- Start -->
+                        <select class="exp-start-month">${getMonthOptions()}</select>
+                        <select class="exp-start-year">${getYearOptions()}</select>
+                        
+                        <span style="text-align:center; color:var(--text-secondary)">to</span>
+                        
+                        <!-- End -->
+                        <select class="exp-end-month" ${isCurrent ? 'disabled' : ''}>${getMonthOptions()}</select>
+                        <select class="exp-end-year" ${isCurrent ? 'disabled' : ''}>${getYearOptions()}</select>
+                     </div>
+                     <div style="margin-top:8px;">
+                        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:normal; font-size:0.9rem;">
+                            <input type="checkbox" class="exp-current" ${isCurrent ? 'checked' : ''} onchange="toggleEndDate(this)">
+                            I currently work here
+                        </label>
+                     </div>
+                </div>
+
+                 <div class="form-group full-width">
+                    <label>Description</label>
+                    <textarea class="exp-desc" style="min-height:60px; font-size:0.9rem;">${data.responsibilities || (Array.isArray(data.description) ? data.description.join('\\n') : (data.description || ''))}</textarea>
+                </div>
+            </div>
+        `;
+
+        // Set values
+        div.querySelector('.exp-start-month').value = start.month || "";
+        div.querySelector('.exp-start-year').value = start.year || "";
+        if (!isCurrent) {
+            div.querySelector('.exp-end-month').value = end.month || "";
+            div.querySelector('.exp-end-year').value = end.year || "";
+        }
+
+        container.appendChild(div);
+    };
+
+    window.toggleEndDate = (checkbox) => {
+        const parent = checkbox.closest('.form-group'); // The checkbox wrapper
+        const dateRow = parent.previousElementSibling; // The grid row
+        const endMonth = dateRow.querySelector('.exp-end-month');
+        const endYear = dateRow.querySelector('.exp-end-year');
+
+        if (checkbox.checked) {
+            endMonth.disabled = true;
+            endYear.disabled = true;
+            endMonth.value = "";
+            endYear.value = "";
+        } else {
+            endMonth.disabled = false;
+            endYear.disabled = false;
+        }
+    };
+
+    window.addEducationItem = (data = {}) => {
+        const container = document.getElementById('education-container');
+        const div = document.createElement('div');
+        div.className = 'education-item';
+        div.style = "background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; border: 1px solid var(--glass-border); position: relative;";
+
+        // Parse existing date
+        let start = { month: "", year: "" };
+        let end = { month: "", year: "" };
+
+        // Logic for Edu: sometimes it's just "2022" (Graduation), sometimes "2018 - 2022"
+        if (data.date || data.year) {
+            const raw = data.date || data.year;
+            // Check for range
+            if (raw.includes('-')) {
+                const parts = raw.split('-');
+                if (parts.length >= 1) start = parseDateString(parts[0]);
+                if (parts.length >= 2) end = parseDateString(parts[1]);
+            } else {
+                // Assume Single Date is End Date (Graduation)
+                end = parseDateString(raw);
+            }
+        }
+
+        if (data.start_year) start = { month: data.start_month, year: data.start_year };
+        if (data.end_year) end = { month: data.end_month, year: data.end_year };
+
+        div.innerHTML = `
+            <button type="button" onclick="this.parentElement.remove()" style="position:absolute; top:10px; right:12px; background:transparent; border:none; color:#f87171; cursor:pointer;">✖</button>
+            <div class="form-grid" style="margin-bottom:0;">
+                <div class="form-group">
+                    <label>School / Institution</label>
+                    <input type="text" class="edu-school" value="${data.institution || data.school || ''}" placeholder="University Name">
+                </div>
+                <div class="form-group">
+                    <label>Degree / Certificate</label>
+                    <input type="text" class="edu-degree" value="${data.degree || ''}" placeholder="B.S. Computer Science">
+                </div>
+                
+                 <!-- Date Grid -->
+                <div class="form-group full-width">
+                     <label>Dates Attended</label>
+                     <div style="display:grid; grid-template-columns: 1fr 1fr 20px 1fr 1fr; gap:10px; align-items:center;">
+                        <!-- Start -->
+                        <select class="edu-start-month">${getMonthOptions()}</select>
+                        <select class="edu-start-year">${getYearOptions()}</select>
+                        
+                        <span style="text-align:center; color:var(--text-secondary)">to</span>
+                        
+                        <!-- End -->
+                        <select class="edu-end-month">${getMonthOptions()}</select>
+                        <select class="edu-end-year">${getYearOptions()}</select>
+                     </div>
+                </div>
+            </div>
+        `;
+
+        // Set Values
+        div.querySelector('.edu-start-month').value = start.month || "";
+        div.querySelector('.edu-start-year').value = start.year || "";
+        div.querySelector('.edu-end-month').value = end.month || "";
+        div.querySelector('.edu-end-year').value = end.year || "";
+
+        container.appendChild(div);
+    };
+
     // Helper: Populate Form
     const populateForm = (pd) => {
         if (!pd) return;
@@ -576,7 +781,7 @@ async function initProfilePage() {
             if (d.authorization) document.getElementById('authorization').value = d.authorization;
         }
 
-        // Details (Dynamic)
+        // Details (Dynamic List Helpers must be defined before calling) (they are attached to window now)
         document.getElementById('experience-container').innerHTML = '';
         if (pd.experience && Array.isArray(pd.experience)) {
             pd.experience.forEach(addExperienceItem);
@@ -589,60 +794,7 @@ async function initProfilePage() {
     };
 
     // --- Dynamic List Helpers (Moved to top) ---
-    window.addExperienceItem = (data = {}) => {
-        const container = document.getElementById('experience-container');
-        const id = Date.now() + Math.random();
-        const div = document.createElement('div');
-        div.className = 'experience-item';
-        div.style = "background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; border: 1px solid var(--glass-border); position: relative;";
-        div.innerHTML = `
-            <button type="button" onclick="this.parentElement.remove()" style="position:absolute; top:10px; right:10px; background:transparent; border:none; color:#f87171; cursor:pointer;">✖</button>
-            <div class="form-grid" style="margin-bottom:0;">
-                <div class="form-group">
-                    <label>Company</label>
-                    <input type="text" class="exp-company" value="${data.company || ''}" placeholder="Company Name">
-                </div>
-                <div class="form-group">
-                    <label>Title</label>
-                    <input type="text" class="exp-title" value="${data.title || ''}" placeholder="Job Title">
-                </div>
-                <div class="form-group">
-                    <label>Date Range</label>
-                    <input type="text" class="exp-date" value="${data.duration || ''}" placeholder="e.g. 2020 - Present">
-                </div>
-                 <div class="form-group full-width">
-                    <label>Description</label>
-                    <textarea class="exp-desc" style="min-height:60px; font-size:0.9rem;">${data.responsibilities || (Array.isArray(data.description) ? data.description.join('\\n') : (data.description || ''))}</textarea>
-                </div>
-            </div>
-        `;
-        container.appendChild(div);
-    };
-
-    window.addEducationItem = (data = {}) => {
-        const container = document.getElementById('education-container');
-        const div = document.createElement('div');
-        div.className = 'education-item';
-        div.style = "background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; border: 1px solid var(--glass-border); position: relative;";
-        div.innerHTML = `
-            <button type="button" onclick="this.parentElement.remove()" style="position:absolute; top:10px; right:10px; background:transparent; border:none; color:#f87171; cursor:pointer;">✖</button>
-            <div class="form-grid" style="margin-bottom:0;">
-                <div class="form-group">
-                    <label>School / Institution</label>
-                    <input type="text" class="edu-school" value="${data.institution || data.school || ''}" placeholder="University Name">
-                </div>
-                <div class="form-group">
-                    <label>Degree / Certificate</label>
-                    <input type="text" class="edu-degree" value="${data.degree || ''}" placeholder="B.S. Computer Science">
-                </div>
-                <div class="form-group">
-                    <label>Date</label>
-                    <input type="text" class="edu-date" value="${data.date || data.year || ''}" placeholder="e.g. 2018 - 2022">
-                </div>
-            </div>
-        `;
-        container.appendChild(div);
-    };
+    // (We replaced the old window.addExperienceItem / addEducationItem above with the new versions that have dropdowns)
 
     // Bind Add Buttons
     const addExpBtn = document.getElementById('add-experience-btn');
@@ -739,19 +891,73 @@ async function initProfilePage() {
 
             // Scrape Dynamic Inputs
             document.querySelectorAll('.experience-item').forEach(el => {
+                const startM = el.querySelector('.exp-start-month').value;
+                const startY = el.querySelector('.exp-start-year').value;
+                const isCurrent = el.querySelector('.exp-current').checked;
+
+                let endM = "";
+                let endY = "";
+                let durationStr = "";
+
+                if (startM || startY) {
+                    durationStr = `${startM.substring(0, 3)} ${startY}`;
+                }
+
+                if (isCurrent) {
+                    durationStr += " - Present";
+                } else {
+                    endM = el.querySelector('.exp-end-month').value;
+                    endY = el.querySelector('.exp-end-year').value;
+                    if (endM || endY) {
+                        durationStr += ` - ${endM.substring(0, 3)} ${endY}`;
+                    }
+                }
+
+                durationStr = durationStr.trim().replace(/^- /, '').replace(/ -$/, '');
+
                 newProfileData.experience.push({
                     company: el.querySelector('.exp-company').value,
                     title: el.querySelector('.exp-title').value,
-                    duration: el.querySelector('.exp-date').value,
-                    description: el.querySelector('.exp-desc').value
+                    description: el.querySelector('.exp-desc').value,
+                    // New Fields
+                    start_month: startM,
+                    start_year: startY,
+                    end_month: endM,
+                    end_year: endY,
+                    is_current: isCurrent,
+                    // Legacy Support
+                    duration: durationStr
                 });
             });
 
             document.querySelectorAll('.education-item').forEach(el => {
+                const startM = el.querySelector('.edu-start-month').value;
+                const startY = el.querySelector('.edu-start-year').value;
+                const endM = el.querySelector('.edu-end-month').value;
+                const endY = el.querySelector('.edu-end-year').value;
+
+                let dateStr = "";
+                if (startM || startY) {
+                    dateStr = `${startM.substring(0, 3)} ${startY}`;
+                }
+                if (endM || endY) {
+                    // If both exist, range. If only end exists (grad year), just end? 
+                    // Usually education range is "2018 - 2022".
+                    if (dateStr) dateStr += ` - `;
+                    dateStr += `${endM.substring(0, 3)} ${endY}`;
+                }
+                dateStr = dateStr.trim();
+
                 newProfileData.education.push({
                     school: el.querySelector('.edu-school').value,
                     degree: el.querySelector('.edu-degree').value,
-                    date: el.querySelector('.edu-date').value
+                    // New Fields
+                    start_month: startM,
+                    start_year: startY,
+                    end_month: endM,
+                    end_year: endY,
+                    // Legacy Support
+                    date: dateStr
                 });
             });
 
