@@ -130,17 +130,16 @@ class GoogleResearcherAgent:
                 async with semaphore:
                     if len(all_leads) >= limit: return []
                     
-                    print(f"🔎 DuckDuckGo Search: '{query}'")
+                    print(f"🔎 Brave Search: '{query}'")
                     query_leads = []
                     
                     try:
-                        # Construct Direct URL (Using DuckDuckGo)
+                        # Construct Direct URL (Using Brave Search)
                         encoded_q = urllib.parse.quote(query)
-                        # t=h_ (HTML only? No, use standard but light)
-                        # q={query}&ia=web
-                        url = f"https://duckduckgo.com/?q={encoded_q}&ia=web"
+                        # Request specific URL to avoid redirects/tracking
+                        url = f"https://search.brave.com/search?q={encoded_q}" 
 
-                        # We instruct the agent to use DuckDuckGo
+                        # We instruct the agent to use Brave Search
                         task_prompt = (
                             f"Go to {url} . "
                             f"Extract the TOP 5 search results. "
