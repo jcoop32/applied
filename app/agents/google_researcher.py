@@ -122,8 +122,7 @@ class GoogleResearcherAgent:
         concurrency = 1
         semaphore = asyncio.Semaphore(concurrency)
         
-        # Reuse a single browser instance for all queries to prevent startup overhead/timeouts
-        browser = Browser(headless=True)
+
 
         try:
             async def process_query(query: str):
@@ -152,31 +151,37 @@ class GoogleResearcherAgent:
                         # Add random delay to be a good citizen
                         await asyncio.sleep(random.uniform(1.0, 3.0))
 
-                        # Disable vision to speed up and avoid screenshot timeouts
-                        # Pass the shared browser instance
-                        agent = Agent(task=task_prompt, llm=self.llm, browser=browser, use_vision=False)
-                        history = await agent.run()
-                        
-                        raw = history.final_result() or ""
-                        
-                        # Same JSON extraction logic as ResearcherAgent
-                        # (Refactor this to a util later?)
-                        json_blocks = re.findall(r'```json\s*(.*?)```', raw, re.DOTALL)
-                        if not json_blocks:
-                             match = re.search(r'\{.*"jobs":\s*\[.*\]\s*\}', raw, re.DOTALL)
-                             if match: json_blocks = [match.group(0)]
-                        
-                        for block in json_blocks:
-                            try:
-                                data = json.loads(block.strip())
-                                jobs = data.get('jobs', [])
-                                for j in jobs:
-                                    # Validation: Must be from our ATS list?
-                                    url = j.get('url', '')
-                                    if any(d in url for d in self.ats_domains):
-                                        query_leads.append({**j, 'is_direct_listing': True, 'query_source': query})
-                            except:
-                                pass
+                        # Create a fresh browser instance for each query to ensure reliability
+                        browser = Browser(headless=True)
+
+                        try:
+                            # Disable vision to speed up and avoid screenshot timeouts
+                            agent = Agent(task=task_prompt, llm=self.llm, browser=browser, use_vision=False)
+                            history = await agent.run()
+                            
+                            raw = history.final_result() or ""
+                            
+                            # Same JSON extraction logic as ResearcherAgent
+                            # (Refactor this to a util later?)
+                            json_blocks = re.findall(r'```json\s*(.*?)```', raw, re.DOTALL)
+                            if not json_blocks:
+                                 match = re.search(r'\{.*"jobs":\s*\[.*\]\s*\}', raw, re.DOTALL)
+                                 if match: json_blocks = [match.group(0)]
+                            
+                            for block in json_blocks:
+                                try:
+                                    data = json.loads(block.strip())
+                                    jobs = data.get('jobs', [])
+                                    for j in jobs:
+                                        # Validation: Must be from our ATS list?
+                                        url = j.get('url', '')
+                                        if any(d in url for d in self.ats_domains):
+                                            query_leads.append({**j, 'is_direct_listing': True, 'query_source': query})
+                                except:
+                                    pass
+                        finally:
+                            if hasattr(browser, 'close'):
+                                await browser.close()
 
                     except Exception as e:
                         print(f"   ❌ Error on {query}: {e}")
@@ -186,9 +191,11 @@ class GoogleResearcherAgent:
             tasks = [process_query(q) for q in queries]
             results = await asyncio.gather(*tasks)
 
-        finally:
-            print("🛑 Closing Shared Browser...")
-            await browser.stop()
+        except Exception as e:
+            print(f"❌ Critical Error in Gather: {e}")
+            results = []
+
+
 
         for res in results:
             for lead in res:
