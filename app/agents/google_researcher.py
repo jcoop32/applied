@@ -55,7 +55,10 @@ class GoogleResearcherAgent:
         1. Identify the candidate's core Role Name (e.g. "Software Engineer", "Product Manager"). Use STANDARDIZED industry titles, not niche internal ones.
         2. Identify their Level (Senior, Staff, Intern, etc).
         3. Generate 3 distinct, professional Job Titles they should target.
-        4. Titles must be concise (max 4 words). Avoid "Associate" or "II" unless explicitly appropriate.
+           - Rule: Combine Role + Level (e.g. "Software Engineer Intern", "Senior Backend Developer").
+           - Rule: NEVER output single-word titles like "Intern", "Manager", "Analyst". Be specific.
+           - Rule: If the candidate is a student/intern, include "Intern" or "Co-op" in the title (e.g. "Software Engineering Intern"), But be sure to check the date when they attended college.
+        4. Titles must be concise (max 4 words).
         
         Output ONLY a JSON list of strings (e.g. ["Senior Software Engineer", "Backend Developer"]).
         """
@@ -72,7 +75,14 @@ class GoogleResearcherAgent:
             cleaned_titles = []
             for t in titles:
                  clean = re.sub(r'[()\"\'\[\]]', '', t).strip()
-                 if clean: cleaned_titles.append(clean)
+                 # Filter out single-word titles (double safety)
+                 if clean and ' ' in clean: 
+                     cleaned_titles.append(clean)
+                 elif clean:
+                     # Check if it's a compound word or specialized?
+                     # For now, simplistic check: if length > 1 word, keep.
+                     if len(clean.split()) > 1:
+                         cleaned_titles.append(clean)
             
             # Now combine with ATS domains to make robust queries
             # We don't want to make 5 titles * 6 domains = 30 queries. That's too many.
@@ -152,7 +162,12 @@ class GoogleResearcherAgent:
                         await asyncio.sleep(random.uniform(1.0, 3.0))
 
                         # Create a fresh browser instance for each query to ensure reliability
-                        browser = Browser(headless=True)
+                        # Configure browser with stealth args and timeout
+                        browser = Browser(
+                            headless=True,
+                            disable_security=True,
+                            args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+                        )
 
                         try:
                             # Disable vision to speed up and avoid screenshot timeouts
