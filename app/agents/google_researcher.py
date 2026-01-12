@@ -121,71 +121,75 @@ class GoogleResearcherAgent:
         # Parallel Execution
         concurrency = 1
         semaphore = asyncio.Semaphore(concurrency)
+        
+        # Reuse a single browser instance for all queries to prevent startup overhead/timeouts
+        browser = Browser(headless=True)
 
-        async def process_query(query: str):
-            async with semaphore:
-                if len(all_leads) >= limit: return []
-                
-                print(f"🔎 Google Search: '{query}'")
-                query_leads = []
-
-                # Just page 1 for now on Google (approx 10 results)
-                # Google URLs are complex, let's use the Browser Agent to "Search Google for X" naturally
-                # instead of trying to reverse-engineer the ?q= URL perfectly with headers.
-                
-                browser = Browser(headless=True)
-                try:
-                    # Construct Direct URL (Using Mojeek as requested)
-                    encoded_q = urllib.parse.quote(query)
-                    url = f"https://www.mojeek.com/search?q={encoded_q}" 
-
-                    # We instruct the agent to use Mojeek
-                    task_prompt = (
-                        f"Go to {url} . "
-                        f"Extract the TOP 5 organic search results only. "
-                        f"For each result, try to parse the 'Company' from the title or URL. "
-                        f"Return a strict JSON object: {{'jobs': [{{'title': '...', 'company': '...', 'url': '...', 'snippet': '...'}}]}}. "
-                        f"Keep snippets short (max 20 words). Directly from the page. Do not click. "
-                        f"IMPORTANT: If the page fails to load, shows a 403 Forbidden, or times out, RETURN EMPTY JSON {{'jobs': []}} IMMEDIATELY. DO NOT ATTEMPT TO SEARCH AGAIN."
-                    )
+        try:
+            async def process_query(query: str):
+                async with semaphore:
+                    if len(all_leads) >= limit: return []
                     
-                    # Disable vision to speed up and avoid screenshot timeouts
-                    agent = Agent(task=task_prompt, llm=self.llm, browser=browser, use_vision=False)
-                    history = await agent.run()
+                    print(f"🔎 DuckDuckGo Search: '{query}'")
+                    query_leads = []
                     
-                    raw = history.final_result() or ""
-                    
-                    # Same JSON extraction logic as ResearcherAgent
-                    # (Refactor this to a util later?)
-                    json_blocks = re.findall(r'```json\s*(.*?)```', raw, re.DOTALL)
-                    if not json_blocks:
-                         match = re.search(r'\{.*"jobs":\s*\[.*\]\s*\}', raw, re.DOTALL)
-                         if match: json_blocks = [match.group(0)]
-                    
-                    for block in json_blocks:
-                        try:
-                            data = json.loads(block.strip())
-                            jobs = data.get('jobs', [])
-                            for j in jobs:
-                                # Validation: Must be from our ATS list?
-                                url = j.get('url', '')
-                                if any(d in url for d in self.ats_domains):
-                                    query_leads.append({**j, 'is_direct_listing': True, 'query_source': query})
-                        except:
-                            pass
-
-                except Exception as e:
-                    print(f"   ❌ Error on {query}: {e}")
-                finally:
                     try:
-                        await browser.close()
-                    except:
-                        pass
-                
-                return query_leads
+                        # Construct Direct URL (Using DuckDuckGo)
+                        encoded_q = urllib.parse.quote(query)
+                        # t=h_ (HTML only? No, use standard but light)
+                        # q={query}&ia=web
+                        url = f"https://duckduckgo.com/?q={encoded_q}&ia=web"
 
-        tasks = [process_query(q) for q in queries]
-        results = await asyncio.gather(*tasks)
+                        # We instruct the agent to use DuckDuckGo
+                        task_prompt = (
+                            f"Go to {url} . "
+                            f"Extract the TOP 5 search results. "
+                            f"For each result, try to parse the 'Company' from the title or URL. "
+                            f"Return a strict JSON object: {{'jobs': [{{'title': '...', 'company': '...', 'url': '...', 'snippet': '...'}}]}}. "
+                            f"Keep snippets short (max 20 words). "
+                            f"IMPORTANT: If the page fails to load, shows a CAPTCHA, or times out, RETURN EMPTY JSON {{'jobs': []}} IMMEDIATELY. DO NOT ATTEMPT TO SEARCH AGAIN."
+                        )
+                        
+                        # Add random delay to be a good citizen
+                        await asyncio.sleep(random.uniform(1.0, 3.0))
+
+                        # Disable vision to speed up and avoid screenshot timeouts
+                        # Pass the shared browser instance
+                        agent = Agent(task=task_prompt, llm=self.llm, browser=browser, use_vision=False)
+                        history = await agent.run()
+                        
+                        raw = history.final_result() or ""
+                        
+                        # Same JSON extraction logic as ResearcherAgent
+                        # (Refactor this to a util later?)
+                        json_blocks = re.findall(r'```json\s*(.*?)```', raw, re.DOTALL)
+                        if not json_blocks:
+                             match = re.search(r'\{.*"jobs":\s*\[.*\]\s*\}', raw, re.DOTALL)
+                             if match: json_blocks = [match.group(0)]
+                        
+                        for block in json_blocks:
+                            try:
+                                data = json.loads(block.strip())
+                                jobs = data.get('jobs', [])
+                                for j in jobs:
+                                    # Validation: Must be from our ATS list?
+                                    url = j.get('url', '')
+                                    if any(d in url for d in self.ats_domains):
+                                        query_leads.append({**j, 'is_direct_listing': True, 'query_source': query})
+                            except:
+                                pass
+
+                    except Exception as e:
+                        print(f"   ❌ Error on {query}: {e}")
+                    
+                    return query_leads
+
+            tasks = [process_query(q) for q in queries]
+            results = await asyncio.gather(*tasks)
+
+        finally:
+            print("🛑 Closing Shared Browser...")
+            await browser.stop()
 
         for res in results:
             for lead in res:

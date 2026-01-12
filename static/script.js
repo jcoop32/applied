@@ -289,7 +289,7 @@ window.openResumeDetails = async (filename, fileUrl, jobCount = 0) => {
 
     // Start Polling while modal is open
     if (dashboardPollInterval) clearInterval(dashboardPollInterval);
-    dashboardPollInterval = setInterval(() => checkDashboardStatuses(), 4000);
+    dashboardPollInterval = setInterval(() => checkDashboardStatuses(), 6000);
 
     // Bind Filter Toggle (re-bind safely)
     const filterBtn = document.getElementById('modal-btn-filter');
@@ -494,7 +494,7 @@ async function triggerResumeSearch(filename, type) {
         // Restart Polling implicitly?
         // Actually, if we stopped polling because of COMPLETED, we need to restart it here.
         if (dashboardPollInterval) clearInterval(dashboardPollInterval);
-        dashboardPollInterval = setInterval(() => checkDashboardStatuses(), 4000);
+        dashboardPollInterval = setInterval(() => checkDashboardStatuses(), 6000);
 
         refreshModalStatus(filename);
 

@@ -127,9 +127,11 @@ async def get_matches(
     user_id = current_user['id']
 
     # 1. Get Status
-    # We fetch fresh user data
-    user_data = supabase_service.get_user_by_email(current_user['email']) # This re-fetches
-    status_map = user_data.get('profile_data', {}).get('research_status', {})
+    # Use optimized fetch for just the research status (profile_data)
+    # We use user_id from the token (cached) so we don't need to look up by email again
+    profile_data = supabase_service.get_research_status(user_id)
+    status_map = profile_data.get('research_status', {})  # profile_data might be dict or None
+    if not status_map: status_map = {}
     current_status = status_map.get(resume_filename, {"status": "IDLE"})
 
     # 2. Get Matches from DB
@@ -182,7 +184,7 @@ async def trigger_apply(
     user_id = current_user['id']
     
     # IMMEDIATE STATUS UPDATE: Mark as IN_PROGRESS so UI reflects it immediately
-    supabase_service.update_lead_status_by_url(user_id, job_url, "IN_PROGRESS")
+    supabase_service.update_lead_status_by_url(user_id, job_url, "IN_PROGRESS", resume_filename=resume_filename)
 
     if USE_GITHUB_ACTIONS:
         action_payload = {
@@ -217,7 +219,7 @@ async def trigger_apply(
                 f.write(file_bytes)
 
             # 2. Run Applier
-            await run_applier_task(job_url, tmp_path, profile_blob, api_key)
+            await run_applier_task(job_url, tmp_path, profile_blob, api_key, resume_filename=resume_filename)
 
             # 3. Cleanup
             if os.path.exists(tmp_path):

@@ -82,7 +82,7 @@ async def main():
                     f.write(file_bytes)
 
                 logger.info(f"Starting Apply Task: URL={job_url}")
-                await run_applier_task(job_url, tmp_path, user_profile, api_key)
+                await run_applier_task(job_url, tmp_path, user_profile, api_key, resume_filename=resume_filename)
 
                 # Cleanup
                 if os.path.exists(tmp_path):

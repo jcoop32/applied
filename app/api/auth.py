@@ -58,6 +58,12 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
+
+# Simple in-memory cache for user lookups
+# Key: email (str) -> Value: (user_dict, timestamp)
+user_cache = {}
+CACHE_TTL_SECONDS = 60
+
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -73,10 +79,21 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     except JWTError:
         raise credentials_exception
 
+    # Check Cache
+    now = datetime.utcnow().timestamp()
+    if email in user_cache:
+        cached_user, timestamp = user_cache[email]
+        if now - timestamp < CACHE_TTL_SECONDS:
+            return cached_user
+
     # Verify user still exists
     user = supabase_service.get_user_by_email(email)
     if user is None:
         raise credentials_exception
+    
+    # Update Cache
+    user_cache[email] = (user, now)
+
     return user
 
 # Routes

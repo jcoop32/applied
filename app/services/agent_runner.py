@@ -145,25 +145,10 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
              print(f"❌ Failed to final update status: {status_err}")
 
 
-async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, api_key: str):
+async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, api_key: str, resume_filename: str = None):
     print(f"🚀 Worker: Applying to {job_url} ...")
     
     # Resolve Lead ID for status updates
-    # We need user_id to look up the lead. 
-    # user_profile is expected to contain 'id' or we need to extract it/pass it.
-    # The 'run_applier_task' signature might need user_id explicitly if it's not in profile.
-    # Looking at cli.py: payload.get("user_profile") is passed.
-    # Usually user_profile comes from the DB 'users' table or is constructed.
-    # Let's assume user_profile has 'id' or we need to patch cli.py to pass user_id to this function.
-    
-    # Wait, cli.py passes `user_profile` which is `payload.get("user_profile", {})`.
-    # And `user_id` is available in `cli.py`! 
-    # But `run_applier_task` signature in `agent_runner.py` is:
-    # `async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, api_key: str):`
-    # It misses `user_id`. I should update the signature.
-    
-    # For now, let's look at how we can get user_id. 
-    # If user_profile has it, great.
     user_id = user_profile.get("user_id") or user_profile.get("id")
     
     lead_id = None
@@ -174,7 +159,8 @@ async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, a
             lead_id = lead['id']
             print(f"📋 Found Lead ID: {lead_id}")
             # Use specific ID update
-            supabase_service.update_lead_status(lead_id, "APPLYING")
+            # Pass invalidation metadata if we have it
+            supabase_service.update_lead_status(lead_id, "APPLYING", user_id=user_id, resume_filename=resume_filename)
         else:
             print("⚠️ Could not find existing lead for this URL. Status updates will be skipped.")
     else:
@@ -206,9 +192,9 @@ async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, a
              if "DryRun" in str(result_status): final_status = "DRY_RUN"
              
              print(f"✅ Final Status Verdict: {final_status}")
-             supabase_service.update_lead_status(lead_id, final_status)
+             supabase_service.update_lead_status(lead_id, final_status, user_id=user_id, resume_filename=resume_filename)
 
     except Exception as e:
         print(f"❌ Worker: Applier Failed: {e}")
         if lead_id:
-            supabase_service.update_lead_status(lead_id, "FAILED")
+            supabase_service.update_lead_status(lead_id, "FAILED", user_id=user_id, resume_filename=resume_filename)
