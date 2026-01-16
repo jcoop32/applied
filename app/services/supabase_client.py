@@ -8,6 +8,8 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 BUCKET_NAME = "resumes"
 
+import time
+
 class SupabaseService:
     def __init__(self):
         if not SUPABASE_URL or not SUPABASE_KEY:
@@ -16,8 +18,18 @@ class SupabaseService:
         else:
             self.client: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
         
-        # Cache: Key = f"{user_id}_{resume_filename}" -> Value = List[Dict]
+        # Cache: Key = f"{user_id}_{resume_filename}" -> Value = (List[Dict], timestamp)
         self.leads_cache = {}
+        self.LEADS_CACHE_TTL = 60 # seconds
+
+    def invalidate_leads_cache(self, user_id: int, resume_filename: str):
+        """
+        Manually validates the leads cache for a specific user/resume.
+        """
+        cache_key = f"{user_id}_{resume_filename}"
+        if cache_key in self.leads_cache:
+            del self.leads_cache[cache_key]
+            print(f"🧹 Invalidated leads cache for {cache_key}")
 
     def upload_resume(self, file_content: bytes, file_name: str, user_id: int, content_type: str = "application/pdf") -> str:
         """
@@ -316,10 +328,7 @@ class SupabaseService:
                 print(f"✅ Saved {len(new_records)} new leads to DB (skipped {len(leads) - len(new_records)} duplicates).")
                 
                 # Invalidate Cache
-                cache_key = f"{user_id}_{resume_filename}"
-                if cache_key in self.leads_cache:
-                    del self.leads_cache[cache_key]
-                    print(f"🧹 Invalidated leads cache for {cache_key}")
+                self.invalidate_leads_cache(user_id, resume_filename)
             else:
                  print("ℹ️ No new leads to save (all duplicates).")
 
@@ -365,10 +374,7 @@ class SupabaseService:
             
             # Invalidate Cache if resume_filename provided
             if resume_filename:
-                cache_key = f"{user_id}_{resume_filename}"
-                if cache_key in self.leads_cache:
-                    del self.leads_cache[cache_key]
-                    print(f"🧹 Invalidated cache for {cache_key} (Status Update)")
+                self.invalidate_leads_cache(user_id, resume_filename)
 
         except Exception as e:
             print(f"❌ Supabase Lead Status Update Error: {e}")
@@ -390,10 +396,7 @@ class SupabaseService:
             
             # Invalidate Cache
             if user_id and resume_filename:
-                cache_key = f"{user_id}_{resume_filename}"
-                if cache_key in self.leads_cache:
-                    del self.leads_cache[cache_key]
-                    print(f"🧹 Invalidated cache for {cache_key} (ID Update)")
+                self.invalidate_leads_cache(user_id, resume_filename)
 
         except Exception as e:
             print(f"❌ Supabase Lead Status ID Update Error: {e}")
@@ -409,8 +412,13 @@ class SupabaseService:
             # Check Cache
             cache_key = f"{user_id}_{resume_filename}"
             if cache_key in self.leads_cache:
-                # print(f"⚡ Cache Hit for leads: {cache_key}")
-                return self.leads_cache[cache_key]
+                data, timestamp = self.leads_cache[cache_key]
+                if time.time() - timestamp < self.LEADS_CACHE_TTL:
+                    # print(f"⚡ Cache Hit for leads: {cache_key}")
+                    return data
+                else:
+                    # print(f"⌛ Cache Expired for leads: {cache_key}")
+                    pass
 
             # Order by match_score desc, then created_at desc
             response = self.client.table("leads")\
@@ -422,7 +430,7 @@ class SupabaseService:
                 .execute()
 
             # Update Cache
-            self.leads_cache[cache_key] = response.data
+            self.leads_cache[cache_key] = (response.data, time.time())
             return response.data
         except Exception as e:
             print(f"❌ Supabase Leads Fetch Error: {e}")

@@ -140,20 +140,22 @@ class GoogleResearcherAgent:
                 async with semaphore:
                     if len(all_leads) >= limit: return []
                     
-                    print(f"🔎 DuckDuckGo Lite: '{query}'")
+                    print(f"🔎 Brave Search: '{query}'")
                     query_leads = []
                     
                     try:
-                        # Construct Direct URL (Standard DuckDuckGo)
+                        # Construct Direct URL (Using Brave Search)
                         encoded_q = urllib.parse.quote(query)
                         # Request specific URL to avoid redirects/tracking
-                        url = f"https://duckduckgo.com/?q={encoded_q}&t=h_&ia=web" 
+                        url = f"https://search.brave.com/search?q={encoded_q}&source=web" 
 
-                        # We instruct the agent to use DuckDuckGo
+                        # We instruct the agent to use Brave Search
                         task_prompt = (
                             f"Go to {url} . "
                             f"Extract the TOP 5 search results. "
                             f"For each result, try to parse the 'Company' from the title or URL. "
+                            f"CRITICAL: Extract the EXACT 'href' from the link (anchor tag) of the search result. "
+                            f"Do NOT guess or reconstruct the URL from the visible text. "
                             f"Return a strict JSON object: {{'jobs': [{{'title': '...', 'company': '...', 'url': '...', 'snippet': '...'}}]}}. "
                             f"Keep snippets short (max 20 words). "
                             f"If the page loads, extract jobs. Ignore 'page readiness' warnings if content is visible."
@@ -161,6 +163,7 @@ class GoogleResearcherAgent:
                         
                         # Add random delay to be a good citizen
                         await asyncio.sleep(random.uniform(1.0, 2.0))
+
 
                         # Instantiate Browser FRESH for this query to avoid CDP errors
                         browser = Browser(
@@ -193,8 +196,13 @@ class GoogleResearcherAgent:
                                     for j in jobs:
                                         # Validation: Must be from our ATS list?
                                         url = j.get('url', '')
+                                        # Basic domain check
                                         if any(d in url for d in self.ats_domains):
-                                            query_leads.append({**j, 'is_direct_listing': True, 'query_source': query})
+                                            # HTTP Verification (Head Request)
+                                            if await self._verify_url(url):
+                                                query_leads.append({**j, 'is_direct_listing': True, 'query_source': query})
+                                            else:
+                                                print(f"   🗑️ Invalid/Dead Link detected: {url}")
                                 except:
                                     pass
                         finally:
@@ -223,3 +231,32 @@ class GoogleResearcherAgent:
                     all_leads.append(lead)
         
         return all_leads[:limit]
+
+    async def _verify_url(self, url: str) -> bool:
+        """
+        Verifies if a URL is valid and accessible (200 OK).
+        Follows redirects.
+        """
+        import requests
+        try:
+            # We run this in a thread to avoid blocking the async event loop
+            def check():
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+                }
+                # Use GET with stream=True to avoid downloading large content
+                response = requests.get(url, headers=headers, timeout=5, allow_redirects=True, stream=True)
+                # Check for 404 or 500
+                if response.status_code >= 400:
+                    return False
+                # Double check: sometimes Greenhouse redirects to a generic error page with 200 OK?
+                # e.g. https://job-boards.greenhouse.io/nvidia?error=true was found by the subagent earlier.
+                # However, usually redirects return 3xx which requests handles.
+                # If we landed on a URL containing "error", it's bad.
+                if "error" in response.url.lower() or "not found" in response.url.lower():
+                    return False
+                return True
+
+            return await asyncio.to_thread(check)
+        except Exception:
+            return False

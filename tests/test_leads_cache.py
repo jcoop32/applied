@@ -32,11 +32,14 @@ class TestLeadsCache(unittest.TestCase):
         self.assertEqual(mock_execute.execute.call_count, 1)
 
         # 2. Second Fetch (Cache Hit)
-        result2 = self.service.get_leads(user_id, resume)
-        self.assertEqual(result2, mock_data)
-        self.assertEqual(mock_execute.execute.call_count, 1) # Should NOT increment
+        # Mock time to ensure hit
+        with unittest.mock.patch('time.time', return_value=self.service.leads_cache[f"{user_id}_{resume}"][1] + 1):
+            result2 = self.service.get_leads(user_id, resume)
+            self.assertEqual(result2, mock_data)
+            self.assertEqual(mock_execute.execute.call_count, 1) # Should NOT increment
 
-        # 3. Invalidate via Update Status
+        # 3. Cache Expiry vs Invalidation
+        # Test Invalidation (Explicit delete)
         # We assume update_lead_status calls .update().eq().execute()
         self.service.update_lead_status(1, "APPLIED", user_id=user_id, resume_filename=resume)
         
@@ -48,6 +51,36 @@ class TestLeadsCache(unittest.TestCase):
         result3 = self.service.get_leads(user_id, resume)
         self.assertEqual(result3, mock_data)
         self.assertEqual(mock_execute.execute.call_count, 2)
+
+    def test_get_leads_expiry(self):
+        user_id = 100
+        resume = "test_expiry.pdf"
+        mock_data = [{"id": 2, "title": "Job 2"}]
+        
+        mock_execute = MagicMock()
+        mock_execute.execute.return_value.data = mock_data
+        
+        self.service.client.table.return_value\
+            .select.return_value\
+            .eq.return_value\
+            .eq.return_value\
+            .order.return_value\
+            .limit.return_value = mock_execute
+
+        # 1. Fetch
+        self.service.get_leads(user_id, resume)
+        
+        # 2. Fetch again (Hit)
+        with unittest.mock.patch('time.time', return_value=self.service.leads_cache[f"{user_id}_{resume}"][1] + 1):
+            self.service.get_leads(user_id, resume)
+            self.assertEqual(mock_execute.execute.call_count, 1)
+
+        # 3. Fetch after TTL (Miss)
+        # Advance time by TTL + 1
+        start_time = self.service.leads_cache[f"{user_id}_{resume}"][1]
+        with unittest.mock.patch('time.time', return_value=start_time + self.service.LEADS_CACHE_TTL + 1):
+             self.service.get_leads(user_id, resume)
+             self.assertEqual(mock_execute.execute.call_count, 2)
 
 if __name__ == "__main__":
     unittest.main()

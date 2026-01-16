@@ -133,6 +133,9 @@ async def delete_resume(
             if updates:
                  supabase_service.update_user_profile(user_id, updates)
 
+        # Invalidate leads cache for the deleted resume
+        supabase_service.invalidate_leads_cache(user_id, filename)
+
         supabase_service.delete_file(path)
         return {"message": "Deleted successfully"}
     except Exception as e:

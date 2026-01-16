@@ -313,7 +313,14 @@ class ApplierAgent:
         print(f"🎯 Target ATS URL: {resolved_url}")
         
         if lead_id:
-            supabase_service.update_lead_status(lead_id, "NAVIGATING")
+            # Determine execution mode for status visibility
+            mode_label = "Standard"
+            if os.getenv("BROWSER_USE_API_KEY"):
+                mode_label = "Cloud"
+            elif os.getenv("GITHUB_ACTIONS"):
+                mode_label = "GHA"
+            
+            supabase_service.update_lead_status(lead_id, f"NAVIGATING ({mode_label})")
 
         # 1. Generate a potential password for this site in case we need to register
         site_password = generate_strong_password()
