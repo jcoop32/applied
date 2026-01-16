@@ -402,7 +402,12 @@ class ApplierAgent:
 
         # Ensure browser has some security options disabled to allow file access if needed?
         # Usually standard config is fine.
-        browser = Browser(headless=self.headless)
+        if os.getenv("BROWSER_USE_API_KEY"):
+            print("☁️ Using Browser Use Cloud for enhanced stealth")
+            # Cloud browser does not support 'headless' arg in the same way, usually handled remote
+            browser = Browser(use_cloud=True)
+        else:
+            browser = Browser(headless=self.headless)
 
         async def ask_user_tool(prompt: str) -> str:
             """
