@@ -352,14 +352,16 @@ class ApplierAgent:
              - Else, **Create Account** with:
                - Email: `{profile.get('email')}`
                - Password: `{site_password}`
-             - **Hover** 1s before clicking "Create Account".
 
-        4. **Verification / 2FA / CAPTCHA (INTERACTIVE)**:
-           - **IF** you see a screen asking for a "Verification Code", "2FA", "OTP", or an unsolvable CAPTCHA:
-             - **STOP**. Do NOT try to guess.
-             - Call `ask_user_tool("Enter the verification code sent to email")`.
+        4. **Verification / 2FA / CAPTCHA (CRITICAL RULES)**:
+           - **Case A: Email/SMS Code**: 
+             - If asked for a code sent to email/phone, Call `ask_user_tool("Enter the verification code sent to email")`.
              - **WAIT** for the tool to return the code.
-             - Input the code and continue.
+           - **Case B: Visual CAPTCHA (Images, Puzzle, Cloudflare)**:
+             - Try to click the check box *once*.
+             - **IF IT FAILS OR REQUIRES SOLVING A PUZZLE**: 
+               - **STOP IMMEDIATELY**. Do NOT try to guess. Do NOT ask user for help (they cannot see the screen).
+               - **RETURN FAILURE JSON**: `{{ "status": "FAILED", "reason": "Visual CAPTCHA detected and blocked automation." }}`
 
         5. **Resume Upload (Top Priority)**:
            - Calls `update_status("Uploading Resume")`.
@@ -368,56 +370,34 @@ class ApplierAgent:
              - **Scan the DOM** for `<input type="file">`.
              - **ACTION**: Use the browser's `upload_file(path="{safe_resume_path}")` action targeting that input.
              - **CRITICAL**: DO NOT click the "Upload Resume" button if it opens a system dialog. You MUST target the `input` element directly.
-             - **FALLBACK**: If the `input` is hidden, try to locate the visible "Upload" button/label, but still attempt to use the `upload_file` action on the associated hidden input if possible.
-           - **VERIFY**: Check if the file name appears or a "Remove" icon shows up.
 
         6. **Form Filling (Comprehensive)**:
            - Calls `update_status("Filling Form")`.
            - **RULE**: Fill **ALL** visible fields. Do not skip any unless explicitly marked "Optional" AND you have no data for it.
-           - **Required Params**: Look for `*` or "Required" labels. PRIORITIZE these.
            - **Inputs**:
              - **Text**: Fill with Profile data.
              - **Dropdowns**: Click, Type 2-3 chars, **WAIT** for options, then **Click** the best match.
-             - **School/University Autocomplete (Specific Rule)**:
-               - **Problem**: Typing full names like "University of Illinois at Chicago" often fails to trigger the substring matcher.
-               - **STRATEGY**:
-                 1. Type the **most unique** keyword first (e.g. for "University of Illinois at Chicago", type "Illinois" or "Chicago").
-                 2. **WAIT** for the list.
-                 3. If found: **Click** it.
-                 4. If NOT found: Clear and type a refined substring (e.g. "Illinois at Chicago").
-             - **Radio/Checkbox**: Click the visual element (label or custom div) if the input is hidden.
-             - **Phone Number**:
-               - **Country Code**: Look for a country flag or dropdown *next to* the phone input.
-               - **ACTION**: Explicitly select "United States" or "+1" **BEFORE** typing the number.
-               - If the phone field splits area code, split `{profile.get('phone')}` accordingly.
+             - **Phone Number**: Select Country Code first if separate.
            - **Mapping**:
              - "Desired Salary" -> `{profile.get('salary_expectations', 'Negotiable')}`
              - "Start Date" -> 2 weeks from today.
              - "LinkedIn" -> `{profile.get('linkedin')}`
              - "Portfolio" -> `{profile.get('portfolio')}`
 
-        # 7. Voluntary Disclosures (OPTIONAL):
-        #    - *Instructions*: These fields are often hidden or effectively optional. 
-        #    - **CRITICAL**: If you cannot easily find 'Veteran' or 'Disability' sections, OR if interacting with them fails after 1 attempt, **SKIP THEM**.
-        #    - Do NOT get stuck trying to scroll/find these specific fields.
-        #    - If present:
-        #      - Gender: `{profile.get('Voluntary Questions Answers', {}).get('Gender', 'Decline to identify')}`
-        #      - Race: `{profile.get('Voluntary Questions Answers', {}).get('Race', 'Decline to identify')}`
-        #      - Veteran: `{profile.get('Voluntary Questions Answers', {}).get('Veteran Status', 'No')}`
-        #      - Disability: `{profile.get('Voluntary Questions Answers', {}).get('Disability Status', 'No')}`
+        7. **Submission & Validation**:
+           - **LOOP (Max 3 attempts)**:
+             1. **Hover** over "Submit"/"Apply" for 1s.
+             2. **CRITICAL PRE-SUBMIT CHECK**: Scour the page for "I Agree" / "Terms" checkboxes again. Click them if unchecked.
+             3. Click "Submit".
+             4. **WAIT 3 SECONDS**.
+             5. **SCAN FOR ERRORS**: Look for red text, "Required field", or "Invalid".
+             6. **IF ERRORS**: **FIX THEM**. Focus on the empty required fields. REPEAT.
+             7. **IF SUCCESS**: Stop.
 
-        # 8. Submission & Validation:
-        #    - **LOOP (Max 3 attempts)**:
-        #      1. **Hover** over "Submit"/"Apply" for 1s.
-        #      2. **CRITICAL PRE-SUBMIT CHECK**: Scour the page for "I Agree" / "Terms" checkboxes again. Click them if unchecked.
-        #      3. Click "Submit".
-        #      4. **WAIT 3 SECONDS**.
-        #      5. **SCAN FOR ERRORS**: Look for red text, "Required field", or "Invalid".
-        #      6. **IF ERRORS**: **FIX THEM**. Focus on the empty required fields. REPEAT.
-        #      7. **IF SUCCESS**: Stop.
-
-        # 9. Output:
-        #    - Return JSON: `{{ "status": "<Submitted/DryRun/Failed>", "account_created": <true/false>, "final_url": "<url>" }}`
+        8. **Output (MANDATORY)**:
+           - **YOU MUST RETURN VALID JSON AT THE END. DO NOT RETURN PLAIN TEXT.**
+           - **Success Format**: `{{ "status": "APPLIED", "account_created": <true/false>, "final_url": "<url>" }}`
+           - **Failure Format**: `{{ "status": "FAILED", "reason": "<Short explanation of why it failed>" }}`
         """
 
         # Ensure browser has some security options disabled to allow file access if needed?
@@ -484,24 +464,39 @@ class ApplierAgent:
             history = await agent.run()
             result_str = history.final_result() or "{}"
 
-
-            # Clean up potential markdown wrapping
-            result_data = {} # Initialize default
+            # --- IMPROVED JSON PARSING ---
+            result_data = {}
             try:
                 import re
-                clean_json = re.sub(r'```json\s*|\s*```', '', result_str).strip()
-                result_data = json.loads(clean_json)
+                # 1. Try to find JSON inside markdown blocks ```json ... ```
+                json_match = re.search(r'```json\s*(\{.*?\})\s*```', result_str, re.DOTALL)
+                
+                # 2. If not found, try to find the first opening/closing brace pair
+                if not json_match:
+                     json_match = re.search(r'(\{.*\})', result_str, re.DOTALL)
+
+                if json_match:
+                    clean_json = json_match.group(1).strip()
+                    result_data = json.loads(clean_json)
+                else:
+                    # If strictly no JSON found, assume it's raw text status (likely failure)
+                    # But try to parse it as JSON one last time in case it is bare JSON
+                    try:
+                        result_data = json.loads(result_str.strip())
+                    except json.JSONDecodeError:
+                         # It is just plain text (e.g. "I failed because...")
+                         pass
 
                 status = result_data.get("status", "Unknown")
-                account_created = result_data.get("account_created", False)
                 account_created = result_data.get("account_created", False)
                 final_url = result_data.get("final_url", resolved_url)
 
             except Exception as e:
                 print(f"⚠️ Warning: Could not parse agent JSON result: {e}. Raw: {result_str}")
-                account_created = "ACCOUNT_CREATED" in str(history) # Fallback check
+                # Fallback logic remains the same
+                account_created = "ACCOUNT_CREATED" in str(history) 
                 final_url = resolved_url
-                status = result_str # Use raw string as status
+                status = result_str # Use raw string so the "FAILED" check below catches it
 
             # Extract Final Domain
             from urllib.parse import urlparse
