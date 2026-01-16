@@ -196,8 +196,8 @@ window.deleteResume = async function (filename) {
 // --- Dashboard Agent Logic (Resume Details Modal) ---
 
 // Make applyToJob global (Moved from Profile Page)
-window.applyToJob = async (btn, url, resume) => {
-    console.log("👉 ApplyToJob Clicked", url, resume);
+window.applyToJob = async (btn, url, resume, mode = 'cloud') => {
+    console.log("👉 ApplyToJob Clicked", url, resume, mode);
     const headers = getAuthHeaders();
     if (!headers) return;
 
@@ -211,7 +211,7 @@ window.applyToJob = async (btn, url, resume) => {
         const res = await fetch('/api/agents/apply', {
             method: 'POST',
             headers: { ...headers, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ job_url: url, resume_filename: resume })
+            body: JSON.stringify({ job_url: url, resume_filename: resume, mode: mode })
         });
 
         if (!res.ok) {
@@ -238,7 +238,7 @@ window.applyToJob = async (btn, url, resume) => {
         btn.disabled = false;
 
         setTimeout(() => {
-            btn.textContent = "⚡ Quick Apply"; // Or originalText
+            btn.textContent = originalText; // Restore original text
             btn.style.background = "";
         }, 3000);
     }
@@ -409,7 +409,10 @@ async function refreshModalStatus(filename) {
                     } else if (m.status === 'FAILED') {
                         return `<button onclick="applyToJob(this, '${m.url}', '${filename}')" class="btn-primary" style="font-size:0.8rem; padding: 5px 10px; background: #f87171;">❌ Retry</button>`;
                     } else if (m.status === 'NEW' || !m.status) {
-                        return `<button onclick="applyToJob(this, '${m.url}', '${filename}')" class="btn-primary" style="font-size:0.8rem; padding: 5px 10px;">⚡ Quick Apply</button>`;
+                        return `
+                            <button onclick="applyToJob(this, '${m.url}', '${filename}', 'cloud')" class="btn-primary" style="font-size:0.75rem; padding: 4px 8px; background: #60a5fa; margin-right: 5px;" title="Use Browser Use Cloud (Best)">☁️ Cloud Apply</button>
+                            <button onclick="applyToJob(this, '${m.url}', '${filename}', 'github')" class="btn-secondary" style="font-size:0.75rem; padding: 4px 8px;" title="Use GitHub Actions">🤖 GitHub Action</button>
+                        `;
                     } else {
                         // Catch-all for granular active statuses (Navigating, Filling Form, etc.)
                         // Use a cleaned up display string

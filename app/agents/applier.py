@@ -286,7 +286,7 @@ class ApplierAgent:
             print(f"⚠️ Browser Resolver failed: {e}")
             return url
 
-    async def apply(self, job_url: str, profile: Dict[str, Any], resume_path: str, dry_run: bool = False, lead_id: int = None) -> str:
+    async def apply(self, job_url: str, profile: Dict[str, Any], resume_path: str, dry_run: bool = False, lead_id: int = None, use_cloud: bool = False) -> str:
         """
         Main entry point to apply for a job.
         Navigates, handles auth, fills forms, and optionally submits.
@@ -315,7 +315,7 @@ class ApplierAgent:
         if lead_id:
             # Determine execution mode for status visibility
             mode_label = "Standard"
-            if os.getenv("BROWSER_USE_API_KEY"):
+            if use_cloud:
                 mode_label = "Cloud"
             elif os.getenv("GITHUB_ACTIONS"):
                 mode_label = "GHA"
@@ -409,7 +409,7 @@ class ApplierAgent:
 
         # Ensure browser has some security options disabled to allow file access if needed?
         # Usually standard config is fine.
-        if os.getenv("BROWSER_USE_API_KEY"):
+        if use_cloud or os.getenv("BROWSER_USE_API_KEY"):
             print("☁️ Using Browser Use Cloud for enhanced stealth")
             # Cloud browser does not support 'headless' arg in the same way, usually handled remote
             browser = Browser(use_cloud=True)

@@ -165,6 +165,7 @@ async def trigger_apply(
     """
     job_url = payload.get("job_url")
     resume_filename = payload.get("resume_filename")
+    mode = payload.get("mode") # 'github' or 'cloud' (or None/Local)
 
     if not job_url or not resume_filename:
         raise HTTPException(status_code=400, detail="job_url and resume_filename required")
@@ -186,7 +187,23 @@ async def trigger_apply(
     # IMMEDIATE STATUS UPDATE: Mark as IN_PROGRESS so UI reflects it immediately
     supabase_service.update_lead_status_by_url(user_id, job_url, "IN_PROGRESS", resume_filename=resume_filename)
 
-    if USE_GITHUB_ACTIONS:
+    # Logic Switch
+    should_dispatch_github = False
+    use_cloud_browser = False
+
+    if mode == 'github':
+        should_dispatch_github = True
+    elif mode == 'cloud':
+        # Local/Server-side execution BUT with Cloud Browser
+        should_dispatch_github = False 
+        use_cloud_browser = True
+    else:
+        # Fallback to legacy ENV variable logic
+        if USE_GITHUB_ACTIONS:
+            should_dispatch_github = True
+        # else local/standard
+
+    if should_dispatch_github:
         action_payload = {
             "user_id": user_id,
             "job_url": job_url,
@@ -219,7 +236,7 @@ async def trigger_apply(
                 f.write(file_bytes)
 
             # 2. Run Applier
-            await run_applier_task(job_url, tmp_path, profile_blob, api_key, resume_filename=resume_filename)
+            await run_applier_task(job_url, tmp_path, profile_blob, api_key, resume_filename=resume_filename, use_cloud=use_cloud_browser)
 
             # 3. Cleanup
             if os.path.exists(tmp_path):
