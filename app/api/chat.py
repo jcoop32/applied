@@ -92,137 +92,108 @@ async def chat_message(
     # 2. Save User Message
     supabase_service.save_chat_message(session_id, "user", payload.message)
 
-    # 3. APPLY INTENT DETECTION - Check if message is an apply request
-    import re
-    apply_pattern = r'^Apply to @(.+?) at (.+?) using resume \[(.+?)\]'
-    url_pattern = r'Job URL:\s*(https?://\S+)'
-    
-    apply_match = re.search(apply_pattern, payload.message, re.IGNORECASE)
-    
-    if apply_match:
-        job_title = apply_match.group(1).strip()
-        company = apply_match.group(2).strip()
-        resume_name = apply_match.group(3).strip()
-        
-        # Extract job URL
-        url_match = re.search(url_pattern, payload.message)
-        job_url = url_match.group(1).strip() if url_match else None
-        
-        if job_url:
-            # Extract additional instructions (optional)
-            instructions_match = re.search(r'Additional instructions:\s*(.+)', payload.message, re.DOTALL | re.IGNORECASE)
-            additional_instructions = instructions_match.group(1).strip() if instructions_match else ""
-            
-            # Extract Mode (Optional)
-            # Format: (Mode: Cloud) or (Mode: Local)
-            mode_match = re.search(r'\(Mode:\s*(Cloud|Local)\)', payload.message, re.IGNORECASE)
-            mode_str = mode_match.group(1).lower() if mode_match else "cloud" # Default to cloud
-            
-            use_cloud = True
-            if mode_str == "local":
-                use_cloud = False
+    # 3. Fetch Available Resumes for Context
+    resumes_list = supabase_service.list_resumes(user_id)
+    available_resumes = [r['name'] for r in resumes_list]
 
-            # Trigger the applier agent
+    # 4. Fetch History (from DB)
+    db_history = supabase_service.get_chat_history(session_id)
+    history = [{"role": msg['role'], "content": msg['content']} for msg in db_history if msg['content'] != payload.message]
+
+    # Initialize Agent
+    agent = ChatAgent(api_key=api_key)
+    
+    # Generate Response (with Tools)
+    agent_response = await agent.generate_response(
+        user_id=user_id,
+        message=payload.message,
+        history=history,
+        available_resumes=available_resumes
+    )
+    
+    response_text = agent_response["content"]
+    action = agent_response["action"]
+    
+    # 5. Handle Actions (if any)
+    if action:
+        if action["type"] == "research":
+            # Extract args
+            args = action["payload"]
+            resume_filename = args.get("resume_filename")
+            limit = int(args.get("limit", 20))
+            job_title = args.get("job_title_override")
+            location = args.get("location_override")
             
-            # Trigger the applier agent
+            # Validate Resume
+            if resume_filename not in available_resumes:
+                response_text += f"\n\n(Internal Note: Attempted to use invalid resume '{resume_filename}'. Defaulting logic needed?)"
+                # Just fail safely or let runner handle 
+            
+            # Trigger Research Pipeline
+            from app.services.agent_runner import run_research_pipeline, update_research_status
+            
+            # Update Status immediately
+            update_research_status(user_id, resume_filename, "SEARCHING")
+            
+            background_tasks.add_task(
+                run_research_pipeline,
+                user_id=user_id,
+                resume_filename=resume_filename,
+                api_key=api_key,
+                limit=limit,
+                job_title=job_title,
+                location=location,
+                search_provider="google", # Default
+                session_id=session_id
+            )
+
+        elif action["type"] == "apply":
+            args = action["payload"]
+            job_url = args.get("job_url")
+            resume_filename = args.get("resume_filename")
+            extra_instructions = args.get("extra_instructions")
+            mode = args.get("mode", "cloud")
+            
+            use_cloud = (mode == "cloud")
+            
+            # Trigger Apply Pipeline
             from app.services.agent_runner import run_applier_task
-            from fastapi import BackgroundTasks
             
-            # Get profile data for applier
+            # Get Context
             user_data = supabase_service.get_user_by_email(current_user['email'])
             profile_blob = user_data.get('profile_data', {})
-            if 'email' not in profile_blob:
-                profile_blob['email'] = current_user['email']
-            if 'full_name' not in profile_blob and user_data.get('full_name'):
-                profile_blob['full_name'] = user_data.get('full_name')
+            if 'email' not in profile_blob: profile_blob['email'] = current_user['email']
+            if 'full_name' not in profile_blob and user_data.get('full_name'): profile_blob['full_name'] = user_data.get('full_name')
             
-            # Add additional instructions to profile for applier to use
-            if additional_instructions:
-                profile_blob['apply_instructions'] = additional_instructions
+            if extra_instructions:
+                profile_blob['apply_instructions'] = extra_instructions
             
-            # Mark lead as IN_PROGRESS
-            supabase_service.update_lead_status_by_url(user_id, job_url, "IN_PROGRESS", resume_filename=resume_name)
-            
-            # Download resume and run applier in background
+            # Update Status
+            supabase_service.update_lead_status_by_url(user_id, job_url, "IN_PROGRESS", resume_filename=resume_filename)
+
+            # Wrapper for download & run
             import asyncio
             async def _run_apply():
                 try:
-                    remote_path = f"{user_id}/{resume_name}"
+                    remote_path = f"{user_id}/{resume_filename}"
                     file_bytes = supabase_service.download_file(remote_path)
                     
-                    tmp_path = f"/tmp/apply_{user_id}_{resume_name}"
+                    tmp_path = f"/tmp/apply_{user_id}_{resume_filename}"
                     with open(tmp_path, "wb") as f:
                         f.write(file_bytes)
                     
-                    await run_applier_task(job_url, tmp_path, profile_blob, api_key, resume_filename=resume_name, use_cloud=use_cloud)
+                    await run_applier_task(job_url, tmp_path, profile_blob, api_key, resume_filename=resume_filename, use_cloud=use_cloud, session_id=session_id)
                     
-                    # Cleanup
                     if os.path.exists(tmp_path):
                         os.remove(tmp_path)
                 except Exception as e:
                     print(f"❌ Apply via Chat Failed: {e}")
                     supabase_service.update_lead_status_by_url(user_id, job_url, "FAILED")
-            
-            # Schedule the apply task
-            asyncio.create_task(_run_apply())
-            
-            # Generate response confirming the application started
-            response_text = f"""🚀 **Starting Application!**
+                    supabase_service.save_chat_message(session_id, "model", f"❌ Application Failed: {e}")
 
-I'm now applying to **{job_title}** at **{company}** using your resume **{resume_name}**.
+            background_tasks.add_task(_run_apply)
 
-{"**Additional Instructions:** " + additional_instructions if additional_instructions else ""}
-
-The application is running in the background. You can check the status in the **Jobs** tab. I'll do my best to complete all the forms and answer any questions based on your profile data."""
-            
-            # Save bot response
-            supabase_service.save_chat_message(session_id, "model", response_text)
-            
-            return {
-                "role": "model",
-                "content": response_text,
-                "session_id": session_id
-            }
-
-    # 4. Fetch History (from DB) - if not an apply intent, proceed with normal chat
-    db_history = supabase_service.get_chat_history(session_id)
-    # Convert to format agent expects: [{'role': 'user'/'model', 'content': '...'}]
-    # db has 'role', 'content'
-    history = [{"role": msg['role'], "content": msg['content']} for msg in db_history]
-
-    # Initialize Agent
-    agent = ChatAgent(api_key=api_key)
-    
-    # Generate Response
-    # Note: history includes the message we just saved? yes.
-    # Agent might duplicate it if we pass it again in 'message' arg?
-    # ChatAgent.generate_response appends 'message' to history.
-    # So we should pass history excluding the last message if we want to follow that pattern,
-    # OR change agent to just take full history.
-    # Current agent:
-    # contents = [history...] + [message]
-    # So we should pass history[:-1] if it includes recent, 
-    # BUT we are fetching form DB which definitely includes it.
-    
-    # Correction: Let's pass the message explicitly and history EXCLUDING it to match Agent's expectation.
-    # Or cleaner: Agent takes `messages: List[dict]` and just sends them?
-    # Keeping minimal Agent change: pass message and history-excluding-current.
-    
-    history_for_agent = [h for h in history if h['content'] != payload.message] # Rough filter
-    # Better: just use strict slicing if we trust order.
-    # Let's just trust the agent will handle it or slight duplication isn't fatal for Gemini Flash context.
-    # Actually, let's just pass `payload.message` and `history` (which is previous context).
-    # Since we just inserted current message, `db_history` has it.
-    # We want `history` arg to be PREVIOUS history.
-    prev_history = [h for h in history if h != history[-1]] # All except last (which is current user msg)
-
-    response_text = await agent.generate_response(
-        user_id=user_id,
-        message=payload.message,
-        history=prev_history
-    )
-    
-    # 5. Save Bot Response
+    # 6. Save Bot Response
     supabase_service.save_chat_message(session_id, "model", response_text)
     
     return {

@@ -286,7 +286,7 @@ class ApplierAgent:
             print(f"⚠️ Browser Resolver failed: {e}")
             return url
 
-    async def apply(self, job_url: str, profile: Dict[str, Any], resume_path: str, dry_run: bool = False, lead_id: int = None, use_cloud: bool = False, session_id: int = None) -> str:
+    async def apply(self, job_url: str, profile: Dict[str, Any], resume_path: str, dry_run: bool = False, lead_id: int = None, use_cloud: bool = False, session_id: int = None, instructions: str = None) -> str:
         """
         Main entry point to apply for a job.
         Navigates, handles auth, fills forms, and optionally submits.
@@ -333,6 +333,10 @@ class ApplierAgent:
             " - **IF IT FAILS OR REQUIRES SOLVING A PUZZLE**: \n               - **STOP IMMEDIATELY**. Do NOT try to guess. Do NOT ask user for help (they cannot see the screen).\n               - **RETURN FAILURE JSON**: `{{ \"status\": \"FAILED\", \"reason\": \"Visual CAPTCHA detected and blocked automation.\" }}`"
         )
 
+        user_instructions_block = ""
+        if instructions:
+            user_instructions_block = f"\n        **USER INSTRUCTIONS FOR THIS JOB**:\n        {instructions}\n"
+
         task_prompt = f"""
         **OBJECTIVE**: Apply to the job at this URL: {resolved_url}
 
@@ -343,6 +347,8 @@ class ApplierAgent:
 
         **SAVED CREDENTIALS**:
         {saved_creds_str}
+
+{user_instructions_block}
 
         **INSTRUCTIONS**:
 

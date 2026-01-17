@@ -125,6 +125,7 @@ function initChatPage() {
     window.triggerResearch = triggerResearch;
     window.triggerApply = triggerApply;
 
+    initMentionSystem();
     initAttachResume();
 
     // Check for pending apply prompt from Jobs page
@@ -1108,212 +1109,408 @@ async function loadJobs(resumeName) {
 }
 
 // ==========================================
-// APPLY MODAL LOGIC (Jobs Page)
+// MENTION SYSTEM & UNIFIED APPLY MODAL
 // ==========================================
 
-// Initialize Apply Modal (called from initJobsPage)
+let availableLeads = [];
+
+async function fetchLeadsForMentions() {
+    try {
+        // Get active resume context
+        const profileRes = await authFetch(`${API_BASE}/profile`);
+        const profile = await profileRes.json();
+        const resumeName = profile.primary_resume_name;
+
+        if (!resumeName) return;
+
+        // Fetch leads from DB for this resume
+        const url = `${API_BASE}/leads/?resume=${encodeURIComponent(resumeName)}`;
+        const res = await authFetch(url);
+        const data = await res.json();
+
+        if (data.leads) {
+            availableLeads = data.leads;
+        }
+    } catch (e) {
+        console.error("Failed to fetch leads for mentions", e);
+    }
+}
+
+function initMentionSystem() {
+    const chatInput = document.getElementById("chat-input");
+    if (!chatInput) return;
+
+    // Create Dropdown Element
+    let dropdown = document.createElement("div");
+    dropdown.className = "mention-dropdown";
+    dropdown.id = "mention-dropdown";
+
+    // Convert to relative positioning wrapper if needed, but absolute fixed to input area is easier
+    // For now, let's append to the input-area-wrapper
+    const wrapper = document.querySelector(".input-area-wrapper");
+    if (wrapper) {
+        wrapper.style.position = "relative";
+        wrapper.appendChild(dropdown);
+    } else {
+        document.body.appendChild(dropdown);
+    }
+
+    // Refresh leads on load
+    fetchLeadsForMentions();
+
+    chatInput.addEventListener("keyup", (e) => {
+        const val = chatInput.value;
+        const cursorMoved = e.key === "ArrowLeft" || e.key === "ArrowRight";
+
+        // Detect @ symbol
+        const atIndex = val.lastIndexOf("@");
+
+        if (atIndex !== -1 && !val.substring(atIndex).includes(" ")) {
+            // User is typing a mention
+            const query = val.substring(atIndex + 1).toLowerCase();
+            showMentionDropdown(query, atIndex);
+        } else {
+            dropdown.style.display = "none";
+        }
+    });
+
+    // Intercept Enter processing in the main sendMessage function, 
+    // BUT we also need to handle Enter for selecting a mention
+    chatInput.addEventListener("keydown", (e) => {
+        if (dropdown.style.display === "block" && (e.key === "Enter" || e.key === "Tab")) {
+            e.preventDefault();
+            e.stopPropagation();
+            selectMention();
+        }
+    });
+}
+
+function showMentionDropdown(query, atIndex) {
+    const dropdown = document.getElementById("mention-dropdown");
+    if (!dropdown) return;
+
+    // Filter leads
+    const matches = availableLeads.filter(l =>
+        l.title.toLowerCase().includes(query) ||
+        l.company.toLowerCase().includes(query)
+    ).slice(0, 5);
+
+    if (matches.length === 0) {
+        dropdown.style.display = "none";
+        return;
+    }
+
+    dropdown.innerHTML = "";
+    matches.forEach((lead, index) => {
+        const item = document.createElement("div");
+        item.className = "mention-item";
+        if (index === 0) item.classList.add("active");
+
+        item.innerHTML = `
+            <div class="mention-title">${lead.title}</div>
+            <div class="mention-company">${lead.company}</div>
+        `;
+
+        item.onclick = () => insertMention(lead);
+        dropdown.appendChild(item);
+    });
+
+    dropdown.style.display = "block";
+    dropdown.dataset.atIndex = atIndex;
+}
+
+function selectMention() {
+    const dropdown = document.getElementById("mention-dropdown");
+    const activeItem = dropdown.querySelector(".mention-item.active"); // Or first
+    if (activeItem) activeItem.click();
+}
+
+function insertMention(lead) {
+    const chatInput = document.getElementById("chat-input");
+    const dropdown = document.getElementById("mention-dropdown");
+    const atIndex = parseInt(dropdown.dataset.atIndex);
+
+    const before = chatInput.value.substring(0, atIndex);
+    // STRUCTURE: Apply to @Job Title at Company
+    // We insert just the Title but we might want to store the URL?
+    // For natural language parsing, "Apply to @Title" is fine, we look it up later.
+    const mentionText = `@${lead.title} at ${lead.company} `;
+
+    chatInput.value = before + mentionText;
+    chatInput.focus();
+    dropdown.style.display = "none";
+
+    // Store context for this specific input flow?
+    // We can lookup by title later or set a global "pendingContext"
+    window.lastMentionedJob = lead;
+}
+
+
+// --- Updated Interception Logic ---
+
+// We need to Hook into the existing sendMessage function or replace it.
+// Since sendMessage is defined earlier, we can overwrite it or modify the event listener.
+// A cleaner way is to keep sendMessage as is, but add a check at the top of it.
+// However, since `sendMessage` is defined in this file, we can just modify it IN PLACE using `replace_file_content`.
+// BUT, `script.js` is one big file. I am replacing the end, so I can't easily modify the middle `sendMessage` function without a separate call.
+// So I will override `sendMessage` here at the end. Javascript allows re-definition if using `function` keyword (hoisting) or just assignment.
+// `sendMessage` was defined as `async function sendMessage`. Re-defining it here overrides the previous one.
+
+const originalSendMessage = sendMessage;
+
+sendMessage = async function () {
+    const chatInput = document.getElementById("chat-input");
+    const text = chatInput.value.trim();
+
+    // Regex to detect "Apply to @..." command
+    // Accepts: Apply to @JobTitle ...
+    if (text.toLowerCase().startsWith("apply to @")) {
+        // Try to identify the job
+        // 1. Check window.lastMentionedJob (most reliable if user clicked dropdown)
+        let job = window.lastMentionedJob;
+
+        // 2. If not set, try to fuzzy match from text
+        if (!job) {
+            // Extract title: "Apply to @Software Engineer at Google"
+            // Remove "Apply to @"
+            let raw = text.substring(9);
+            // This is loose, but let's try to match against availableLeads
+            job = availableLeads.find(l => raw.toLowerCase().includes(l.title.toLowerCase()));
+        }
+
+        if (job) {
+            // Open Modal instead of sending
+            // Clear input? Maybe keep it until confirmed?
+            // Let's clear it to show we "consumed" the command
+            chatInput.value = "";
+            chatInput.style.height = "auto";
+
+            // Open Unified Modal
+            // We need to pass the resume context too.
+            const profileRes = await authFetch(`${API_BASE}/profile`);
+            const profile = await profileRes.json();
+
+            openApplyModal(job, profile.primary_resume_name);
+            return;
+        }
+    }
+
+    // Fallback to normal message
+    await originalSendMessage();
+};
+
+
+// ==========================================
+// APPLY MODAL LOGIC (Unified)
+// ==========================================
+
+// Initialize Apply Modal
 function initApplyModal() {
+    // If modal HTML doesn't exist (Chat Page), inject it
+    if (!document.getElementById('apply-modal')) {
+        injectApplyModalHtml();
+    }
+
     const modal = document.getElementById('apply-modal');
-    const closeBtn = document.querySelector('.close-apply-modal');
+    const closeBtn = modal.querySelector('.close-apply-modal');
     const confirmBtn = document.getElementById('apply-confirm-btn');
     const uploadBtn = document.getElementById('apply-upload-btn');
     const uploadInput = document.getElementById('apply-resume-upload');
 
-    if (closeBtn && modal) {
+    if (closeBtn) {
         closeBtn.addEventListener('click', () => {
             modal.style.display = 'none';
         });
     }
 
-    // Close on outside click
-    if (modal) {
-        window.addEventListener('click', (event) => {
-            if (event.target === modal) {
-                modal.style.display = 'none';
-            }
-        });
-    }
+    window.addEventListener('click', (event) => {
+        if (event.target === modal) {
+            modal.style.display = 'none';
+        }
+    });
 
     if (confirmBtn) {
-        confirmBtn.addEventListener('click', confirmApplyToChat);
+        // Remove old listeners to avoid duplicates if re-init
+        const newBtn = confirmBtn.cloneNode(true);
+        confirmBtn.parentNode.replaceChild(newBtn, confirmBtn);
+        newBtn.addEventListener('click', confirmApplyToChat);
     }
 
     if (uploadBtn && uploadInput) {
-        uploadBtn.addEventListener('click', () => uploadInput.click());
-        uploadInput.addEventListener('change', handleApplyResumeUpload);
+        // Same for upload
+        const newUpBtn = uploadBtn.cloneNode(true);
+        uploadBtn.parentNode.replaceChild(newUpBtn, uploadBtn);
+        const newUpInput = uploadInput.cloneNode(true);
+        uploadInput.parentNode.replaceChild(newUpInput, uploadInput);
+
+        newUpBtn.addEventListener('click', () => newUpInput.click());
+        newUpInput.addEventListener('change', handleApplyResumeUpload);
     }
+}
+
+function injectApplyModalHtml() {
+    const modalHtml = `
+    <div id="apply-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Apply Configuration</h3>
+                <span class="close-apply-modal">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div id="apply-job-info" style="margin-bottom: 20px; padding: 15px; background: rgba(255,255,255,0.03); border-radius: 8px;">
+                    <h4 id="apply-job-title" style="margin: 0 0 5px 0; color: var(--accent-color);"></h4>
+                    <p id="apply-job-company" style="margin: 0; color: var(--text-secondary); font-size: 0.9rem;"></p>
+                </div>
+
+                <div style="margin-bottom: 20px;">
+                    <label style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 0.9rem;">Select Resume</label>
+                    <select id="apply-resume-select" style="width: 100%; padding: 10px; border-radius: 6px; background: var(--input-bg); color: var(--text-primary); border: 1px solid var(--border-color);"></select>
+                </div>
+                
+                 <!-- Upload New Resume Option -->
+                <div style="margin-bottom: 20px;">
+                    <label style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 0.9rem;">
+                        Or upload a new resume
+                    </label>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <input type="file" id="apply-resume-upload" accept=".pdf,.docx" style="display: none;">
+                        <button id="apply-upload-btn" class="chip" style="margin: 0;">
+                            <i class="fas fa-upload"></i> Upload New
+                        </button>
+                        <span id="apply-upload-status" style="font-size: 0.85rem; color: var(--text-secondary);"></span>
+                    </div>
+                </div>
+
+                <div style="margin-bottom: 20px;">
+                    <label style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 0.9rem;">Execution Mode</label>
+                    <div style="display: flex; gap: 20px;">
+                        <label style="display: flex; align-items: center; cursor: pointer;">
+                            <input type="radio" name="execution-mode" value="cloud" checked style="margin-right: 8px;">
+                            <span style="color: var(--text-primary);">Cloud (Recommended)</span>
+                        </label>
+                        <label style="display: flex; align-items: center; cursor: pointer;">
+                            <input type="radio" name="execution-mode" value="local" style="margin-right: 8px;">
+                            <span style="color: var(--text-primary);">Local</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div style="margin-bottom: 20px;">
+                    <label style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 0.9rem;">Additional Instructions</label>
+                    <textarea id="apply-instructions" placeholder="e.g., Highlight my Python experience..." style="width: 100%; min-height: 80px; padding: 10px; border-radius: 6px; background: var(--input-bg); color: var(--text-primary); border: 1px solid var(--border-color); font-family: inherit;"></textarea>
+                </div>
+
+                <button id="apply-confirm-btn" style="width: 100%; padding: 12px; background: var(--accent-color); color: #000; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 1rem;">
+                    <i class="fas fa-paper-plane"></i> Start Application
+                </button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
 }
 
 // Open Apply Modal with job data
 async function openApplyModal(lead, contextResumeName) {
+    // Ensure initialized
+    initApplyModal();
+
     const modal = document.getElementById('apply-modal');
     const titleEl = document.getElementById('apply-job-title');
     const companyEl = document.getElementById('apply-job-company');
     const resumeSelect = document.getElementById('apply-resume-select');
     const instructionsEl = document.getElementById('apply-instructions');
-    const uploadStatus = document.getElementById('apply-upload-status');
 
-    if (!modal) return;
-
-    // Store lead data for later use
+    // Store lead data
     window.pendingApplyJob = {
         title: lead.title,
         company: lead.company,
-        url: lead.url,
+        url: lead.url, // Ensure we have URL
         contextResume: contextResumeName
     };
 
-    // Populate job info
     if (titleEl) titleEl.textContent = lead.title;
     if (companyEl) companyEl.textContent = lead.company;
     if (instructionsEl) instructionsEl.value = '';
-    if (uploadStatus) uploadStatus.textContent = '';
 
-    // Populate resume dropdown
+    // Load Resumes
     if (resumeSelect) {
         resumeSelect.innerHTML = '<option value="">Loading...</option>';
-
         try {
             const res = await authFetch(`${API_BASE}/resumes`);
             const resumes = await res.json();
-
             resumeSelect.innerHTML = '';
-
-            if (!Array.isArray(resumes) || resumes.length === 0) {
+            if (resumes.length === 0) {
                 resumeSelect.innerHTML = '<option value="">No resumes found</option>';
             } else {
                 resumes.forEach(r => {
                     const opt = document.createElement('option');
                     opt.value = r.name;
                     opt.textContent = r.name;
-                    // Pre-select the resume that was used when finding this lead
-                    if (r.name === contextResumeName) {
-                        opt.selected = true;
-                    }
+                    if (r.name === contextResumeName) opt.selected = true;
                     resumeSelect.appendChild(opt);
                 });
             }
         } catch (e) {
-            console.error('Error loading resumes for apply modal', e);
-            resumeSelect.innerHTML = '<option value="">Error loading resumes</option>';
+            resumeSelect.innerHTML = '<option>Error loading resumes</option>';
         }
     }
 
-    // Show modal
     modal.style.display = 'block';
-
-    // Initialize modal event listeners if not already done
-    if (!modal.dataset.initialized) {
-        initApplyModal();
-        modal.dataset.initialized = 'true';
-    }
 }
 
-// Build prompt and navigate to chat
-function confirmApplyToChat() {
+// Confirm Apply
+async function confirmApplyToChat() {
     const job = window.pendingApplyJob;
-    if (!job) {
-        alert('No job selected');
-        return;
-    }
+    if (!job) return;
 
     const resumeSelect = document.getElementById('apply-resume-select');
     const instructionsEl = document.getElementById('apply-instructions');
 
-    const selectedResume = resumeSelect?.value || '';
-    const instructions = instructionsEl?.value?.trim() || '';
+    const selectedResume = resumeSelect.value;
+    const instructions = instructionsEl.value.trim();
 
-    // Get Execution Mode
-    const modeInputs = document.getElementsByName('execution-mode');
-    let selectedMode = 'cloud'; // Default
-    if (modeInputs) {
-        for (const input of modeInputs) {
-            if (input.checked) {
-                selectedMode = input.value;
-                break;
-            }
-        }
-    }
+    let selectedMode = 'cloud';
+    document.getElementsByName('execution-mode').forEach(rad => {
+        if (rad.checked) selectedMode = rad.value;
+    });
 
     if (!selectedResume) {
-        alert('Please select a resume');
+        alert("Please select a resume");
         return;
     }
 
-    // Build the structured prompt
-    // We append the mode in a specific format for the backend to parse
-    let prompt = `Apply to @${job.title} at ${job.company} using resume [${selectedResume}].
+    // Close Modal
+    document.getElementById('apply-modal').style.display = 'none';
 
-Job URL: ${job.url}
-(Mode: ${selectedMode === 'local' ? 'Local' : 'Cloud'})`;
-
-    if (instructions) {
-        prompt += `
-
-Additional instructions:
-${instructions}`;
-    }
-
-    // Save to localStorage for chat page pickup
-    localStorage.setItem('pendingApplyPrompt', prompt);
-
-    // Close modal and navigate to chat
-    const modal = document.getElementById('apply-modal');
-    if (modal) modal.style.display = 'none';
-
-    window.location.href = '/';
-}
-
-// Handle resume upload within the apply modal
-async function handleApplyResumeUpload(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const uploadStatus = document.getElementById('apply-upload-status');
-    const resumeSelect = document.getElementById('apply-resume-select');
-
-    if (uploadStatus) uploadStatus.textContent = 'Uploading...';
-
-    const formData = new FormData();
-    formData.append('file', file);
-
-    const token = localStorage.getItem('token');
+    // TRIGGER THE AGENT directly via API
+    addMessage("user", `Apply to ${job.title} (${selectedMode === 'cloud' ? '☁️ Cloud' : '💻 Local'})`);
+    addMessage("model", `Starting Application...`);
 
     try {
-        const res = await fetch(`${API_BASE}/upload`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}` },
-            body: formData
+        const payload = {
+            job_url: job.url,
+            mode: selectedMode,
+            resume_filename: selectedResume,
+            instructions: instructions
+        };
+
+        const res = await authFetch(`${API_BASE}/agents/apply`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
         });
 
         if (res.ok) {
-            if (uploadStatus) uploadStatus.textContent = `✅ Uploaded: ${file.name}`;
-
-            // Refresh the resume dropdown and select the new file
-            const resumesRes = await authFetch(`${API_BASE}/resumes`);
-            const resumes = await resumesRes.json();
-
-            if (resumeSelect && Array.isArray(resumes)) {
-                resumeSelect.innerHTML = '';
-                resumes.forEach(r => {
-                    const opt = document.createElement('option');
-                    opt.value = r.name;
-                    opt.textContent = r.name;
-                    // Select the newly uploaded file
-                    if (r.name === file.name) {
-                        opt.selected = true;
-                    }
-                    resumeSelect.appendChild(opt);
-                });
-            }
+            const data = await res.json();
+            let msg = "✅ Application started.";
+            if (data.session_url) msg += `\n\n🔗 [Watch Live](${data.session_url})`;
+            addMessage("model", msg);
         } else {
-            if (uploadStatus) uploadStatus.textContent = '❌ Upload failed';
+            addMessage("model", "❌ Failed to start application.");
         }
-    } catch (err) {
-        console.error('Upload error', err);
-        if (uploadStatus) uploadStatus.textContent = '❌ Upload error';
+    } catch (e) {
+        console.error(e);
+        addMessage("model", "❌ Error starting application.");
     }
-
-    // Clear the input
-    e.target.value = '';
 }
+

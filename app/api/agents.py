@@ -177,7 +177,7 @@ async def trigger_apply(
     """
     job_url = payload.get("job_url")
     resume_filename = payload.get("resume_filename")
-    mode = payload.get("mode") # 'github' or 'cloud' (or None/Local)
+    instructions = payload.get("instructions") # Optional
 
     if not job_url or not resume_filename:
         raise HTTPException(status_code=400, detail="job_url and resume_filename required")
@@ -234,7 +234,8 @@ async def trigger_apply(
             "job_url": job_url,
             "resume_filename": resume_filename,
             "user_profile": profile_blob,
-            "session_id": session_id # Pass session ID
+            "session_id": session_id, # Pass session ID
+            "instructions": instructions
         }
         success = await dispatch_github_action("apply_agent.yml", "apply", action_payload)
         if success:
@@ -265,7 +266,7 @@ async def trigger_apply(
                 f.write(file_bytes)
 
             # 2. Run Applier
-            await run_applier_task(job_url, tmp_path, profile_blob, api_key, resume_filename=resume_filename, use_cloud=use_cloud_browser, session_id=session_id)
+            await run_applier_task(job_url, tmp_path, profile_blob, api_key, resume_filename=resume_filename, use_cloud=use_cloud_browser, session_id=session_id, instructions=instructions)
 
             # 3. Cleanup
             if os.path.exists(tmp_path):

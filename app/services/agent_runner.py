@@ -150,7 +150,7 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
              print(f"❌ Failed to final update status: {status_err}")
 
 
-async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, api_key: str, resume_filename: str = None, use_cloud: bool = False, session_id: int = None):
+async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, api_key: str, resume_filename: str = None, use_cloud: bool = False, session_id: int = None, instructions: str = None):
     print(f"🚀 Worker: Applying to {job_url} ...")
     if session_id:
         supabase_service.save_chat_message(session_id, "model", f"🚀 Starting Application to **{job_url}**...")
@@ -177,8 +177,8 @@ async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, a
         # Detect environment for headless mode
         is_headless = os.getenv("HEADLESS", "false").lower() == "true" or os.getenv("GITHUB_ACTIONS") == "true"
         applier = ApplierAgent(api_key=api_key, headless=is_headless)
-        # Pass lead_id to apply method
-        result_status = await applier.apply(job_url, user_profile, resume_path, lead_id=lead_id, use_cloud=use_cloud, session_id=session_id)
+        # Pass lead_id and instructions to apply method
+        result_status = await applier.apply(job_url, user_profile, resume_path, lead_id=lead_id, use_cloud=use_cloud, session_id=session_id, instructions=instructions)
         
         print(f"🏁 Worker: Applier finished: {result_status}")
         
