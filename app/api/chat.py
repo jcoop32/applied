@@ -16,7 +16,7 @@ class UpdateSessionRequest(BaseModel):
 
 class MessageRequest(BaseModel):
     message: str
-    session_id: Optional[str] = None # Optional for legacy/first-msg auto-create
+    session_id: Optional[int | str] = None # Optional for legacy/first-msg auto-create
     # history: List[dict] = [] # We'll fetch from DB now
 
 @router.get("/sessions")
@@ -192,6 +192,15 @@ async def chat_message(
                     supabase_service.save_chat_message(session_id, "model", f"❌ Application Failed: {e}")
 
             background_tasks.add_task(_run_apply)
+
+        elif action["type"] == "clarification":
+            # Just pass the action details back to frontend
+            return {
+                "role": "model",
+                "content": response_text or action["payload"].get("question"),
+                "session_id": session_id,
+                "buttons": action["payload"].get("options", [])
+            }
 
     # 6. Save Bot Response
     supabase_service.save_chat_message(session_id, "model", response_text)

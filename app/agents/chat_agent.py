@@ -1,5 +1,6 @@
 import os
 import json
+from typing import List
 from google import genai
 from app.services.supabase_client import supabase_service
 
@@ -38,7 +39,11 @@ class ChatAgent:
         Tone: Professional, Encouraging, Concise.
         
         Instructions:
-        - If the user asks to "Find jobs", check the available resumes. Use the tool if clear, or ask if ambiguous.
+        Instructions:
+        - If the user asks to "Find jobs":
+            - Check the available resumes in your context.
+            - If there are multiple resumes and the user hasn't specified one, you **MUST** use the `ask_clarification` tool to ask which one. **DO NOT** just list them in a text response.
+            - If there is only one resume, just use `search_jobs` with that resume automatically.
         - If the user asks to "Apply", use the `apply_to_job` tool.
         - Keep answers short (under 3 paragraphs).
         - Format output with Markdown.
@@ -67,7 +72,16 @@ class ChatAgent:
             """
             return "started_application"
 
-        tools = [search_jobs, apply_to_job]
+        def ask_clarification(question: str, options: List[str]):
+            """
+            Asks the user a clarification question with selectable options.
+            args:
+                question: The question to ask (e.g. "Which resume?").
+                options: List of string options for the user to click.
+            """
+            return "asked_clarification"
+
+        tools = [search_jobs, apply_to_job, ask_clarification]
 
         # 4. Format History for Gemini
         contents = []
@@ -123,6 +137,15 @@ class ChatAgent:
                         "payload": func_args
                     }
                     response_text += f"\n\n📝 Starting application for **{func_args.get('job_url')}**..."
+
+                elif func_name == "ask_clarification":
+                    action = {
+                        "type": "clarification",
+                        "payload": func_args
+                    }
+                    # Text usually comes from model part anyway, but we can append if needed/missing
+                    # response_text += f"\n\n{func_args.get('question')}" 
+                    pass
 
             if not response_text and action:
                 response_text = "I'm on it."

@@ -385,7 +385,7 @@ function scrollToBottom() {
     if (c) c.scrollTop = c.scrollHeight;
 }
 
-function addMessage(role, content, isHistoryLoad = false) {
+function addMessage(role, content, isHistoryLoad = false, buttons = []) {
     const container = document.getElementById("messages-container");
     if (!container) return;
 
@@ -405,6 +405,33 @@ function addMessage(role, content, isHistoryLoad = false) {
         .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>') : "";
 
     contentDiv.innerHTML = formatted;
+
+    // Render Buttons if any
+    if (buttons && buttons.length > 0) {
+        const btnContainer = document.createElement("div");
+        btnContainer.className = "chat-buttons";
+        btnContainer.style.marginTop = "10px";
+        btnContainer.style.display = "flex";
+        btnContainer.style.gap = "8px";
+        btnContainer.style.flexWrap = "wrap";
+
+        buttons.forEach(btnText => {
+            const btn = document.createElement("button");
+            btn.className = "chip";
+            btn.textContent = btnText;
+            btn.style.fontSize = "0.9rem";
+            btn.style.cursor = "pointer";
+            btn.onclick = () => {
+                const chatInput = document.getElementById("chat-input");
+                if (chatInput) {
+                    chatInput.value = btnText;
+                    sendMessage();
+                }
+            };
+            btnContainer.appendChild(btn);
+        });
+        contentDiv.appendChild(btnContainer);
+    }
 
     msgDiv.appendChild(avatarDiv);
     msgDiv.appendChild(contentDiv);
@@ -460,7 +487,7 @@ async function sendMessage() {
         }
 
         loadingDiv.remove();
-        addMessage("model", data.content);
+        addMessage("model", data.content, false, data.buttons);
 
     } catch (e) {
         const el = document.getElementById(loadingId);
