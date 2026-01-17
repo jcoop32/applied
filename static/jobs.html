@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Applied - Job Leads</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <button class="new-chat-btn" onclick="window.location.href='/'">
+                    <i class="fas fa-comment-alt"></i> Chat
+                </button>
+            </div>
+
+            <div class="sidebar-footer">
+                <a href="/jobs" class="nav-link" style="background-color: #2d2e31;">
+                    <i class="fas fa-briefcase"></i> Jobs
+                </a>
+                <a href="/profile" class="nav-link">
+                    <i class="fas fa-user-circle"></i> Profile
+                </a>
+                <button id="logout-btn" class="nav-link logout">
+                    <i class="fas fa-sign-out-alt"></i> Logout
+                </button>
+                <div class="user-info" id="user-email-display"></div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="chat-interface" style="flex-direction: column; overflow-y: auto;">
+            <!-- Mobile Menu Button -->
+            <div class="mobile-menu-btn" id="mobile-menu-btn" style="padding: 20px; color: var(--text-secondary);">
+                <i class="fas fa-bars"></i>
+            </div>
+
+            <div class="main-container glass-panel"
+                style="margin: 20px auto; max-width: 1000px; padding: 30px; width: 95%;">
+                <header
+                    style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid var(--border-color); padding-bottom: 20px;">
+                    <div>
+                        <h1 style="font-size: 1.8rem; margin-bottom: 5px; color: var(--text-primary);">Job Leads</h1>
+                        <p style="color: var(--text-secondary); font-size: 0.9rem;">Track and manage opportunities found
+                            by the Researcher.</p>
+                    </div>
+                </header>
+
+                <!-- Filters -->
+                <div class="action-bar" style="border:none; margin-bottom: 20px; padding: 0;">
+                    <div style="flex-grow: 1; display:flex; gap: 15px; align-items:center;">
+                        <span style="color: var(--text-secondary); font-size: 0.9rem;">Context:</span>
+                        <select id="resume-filter"
+                            style="padding: 8px; border-radius: 6px; background: var(--input-bg); color: var(--text-primary); border: 1px solid var(--border-color);">
+                            <option value="">Loading...</option>
+                        </select>
+                        <button id="refresh-jobs-btn" class="chip" style="margin:0;"><i
+                                class="fas fa-sync-alt"></i></button>
+                    </div>
+                </div>
+
+                <!-- Jobs Table/Grid -->
+                <div id="jobs-container" class="jobs-grid">
+                    <p style="text-align:center; color: var(--text-secondary); margin-top: 50px;">Select a resume to
+                        view leads.</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Scripts -->
+    <script src="/static/script.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // We'll expose initJobsPage in script.js or define logic here?
+            // Better to keep in script.js for authFetch and reused logic
+            if (typeof initJobsPage === 'function') {
+                initJobsPage();
+            }
+        });
+    </script>
+</body>
+
+</html>

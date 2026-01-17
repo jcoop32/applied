@@ -10,6 +10,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
+        /* Override/Extend for form layout */
         .form-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -25,6 +26,7 @@
             display: block;
             margin-bottom: 8px;
             color: var(--text-secondary);
+            font-size: 0.9rem;
         }
 
         .form-group input,
@@ -34,9 +36,17 @@
             padding: 12px;
             border-radius: 8px;
             border: 1px solid var(--glass-border);
-            background: rgba(0, 0, 0, 0.2);
+            background: var(--input-bg, rgba(0, 0, 0, 0.2));
             color: var(--text-primary);
             outline: none;
+            font-family: inherit;
+        }
+
+        .form-group input:focus,
+        .form-group textarea:focus,
+        .form-group select:focus {
+            border-color: var(--accent);
+            background: rgba(139, 92, 246, 0.1);
         }
 
         .action-bar {
@@ -56,15 +66,26 @@
             border: none;
             cursor: pointer;
             font-weight: 600;
+            transition: opacity 0.2s;
+        }
+
+        .btn-primary:hover {
+            opacity: 0.9;
         }
 
         .btn-secondary {
-            background: rgba(255, 255, 255, 0.1);
-            color: white;
+            background: rgba(255, 255, 255, 0.05);
+            /* Darker secondary */
+            color: var(--text-primary);
             padding: 10px 20px;
             border-radius: 8px;
-            border: none;
+            border: 1px solid var(--glass-border);
             cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.1);
         }
 
         .json-editor {
@@ -76,166 +97,205 @@
 </head>
 
 <body>
-    <div class="background-blobs">
-        <div class="blob blob-1"></div>
-        <div class="blob blob-2"></div>
-        <div class="blob blob-3"></div>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <button class="new-chat-btn" onclick="window.location.href='/'">
+                    <i class="fas fa-plus"></i> Back to Chat
+                </button>
+            </div>
+
+            <!-- We can hide history list on profile or show it? Script handles it? -->
+            <div class="chat-history" id="chat-history-list">
+                <!-- Chat sessions will be injected here if script allows -->
+            </div>
+
+            <div class="sidebar-footer">
+                <a href="/jobs" class="nav-link">
+                    <i class="fas fa-briefcase"></i> Jobs
+                </a>
+                <a href="/profile" class="nav-link" style="background-color: #2d2e31;">
+                    <i class="fas fa-user-circle"></i> Profile
+                </a>
+                <button id="logout-btn" class="nav-link logout">
+                    <i class="fas fa-sign-out-alt"></i> Logout
+                </button>
+                <div class="user-info" id="user-email-display">
+                    <!-- Email injected here -->
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="chat-interface" style="flex-direction: column; overflow-y: auto;">
+            <div class="mobile-menu-btn" id="mobile-menu-btn" style="padding: 20px; color: var(--text-secondary);">
+                <i class="fas fa-bars"></i>
+            </div>
+
+            <div class="main-container glass-panel"
+                style="margin: 20px auto; max-width: 900px; padding: 30px; width: 90%;">
+                <header
+                    style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; border-bottom: 1px solid var(--border-color); padding-bottom: 20px;">
+                    <div>
+                        <h1 style="font-size: 1.8rem; margin-bottom: 5px; color: var(--text-primary);">My Profile
+                        </h1>
+                        <p style="color: var(--text-secondary); font-size: 0.9rem;">Manage your resume data and
+                            preferences</p>
+                    </div>
+                </header>
+
+                <section>
+                    <div class="action-bar" style="border:none;">
+                        <div class="form-group" style="flex-grow: 1; margin-right: 20px; margin-bottom: 0;">
+                            <label>Primary Resume Context</label>
+                            <select id="primary-resume-select">
+                                <option value="">Loading resumes...</option>
+                            </select>
+                        </div>
+                        <div style="display: flex; gap: 10px; align-items: flex-end;">
+                            <!-- Auto-fill button -->
+                            <button id="parse-btn" class="btn-primary"
+                                style="height: 42px; display:flex; align-items:center; gap:8px;">
+                                <i class="fas fa-magic"></i> Auto-Fill from Resume
+                            </button>
+                        </div>
+                    </div>
+
+                    <form id="profile-form">
+                        <div class="form-grid">
+                            <div class="form-group full-width">
+                                <label>Full Name</label>
+                                <input type="text" id="full_name" placeholder="John Doe">
+                            </div>
+                        </div>
+
+                        <!-- Contact & Demographics -->
+                        <h3
+                            style="margin-top:20px; margin-bottom: 15px; color: var(--accent-color); font-size: 1rem; text-transform: uppercase; letter-spacing: 0.05em;">
+                            Contact & Demographics</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>Phone</label>
+                                <input type="text" id="phone" placeholder="+1 555-0123">
+                            </div>
+                            <div class="form-group">
+                                <label>LinkedIn URL</label>
+                                <input type="text" id="linkedin" placeholder="https://linkedin.com/in/...">
+                            </div>
+                            <div class="form-group">
+                                <label>Portfolio / Website</label>
+                                <input type="text" id="portfolio" placeholder="https://myportfolio.com">
+                            </div>
+                            <div class="form-group">
+                                <label>Address (City, State)</label>
+                                <input type="text" id="address" placeholder="San Francisco, CA">
+                            </div>
+
+                            <div class="form-group">
+                                <label>Desired Salary</label>
+                                <input type="text" id="salary_expectations" placeholder="e.g. $120k+, Negotiable">
+                            </div>
+
+                            <!-- Extended Demographics -->
+                            <div class="form-group">
+                                <label>Race / Ethnicity</label>
+                                <select id="race">
+                                    <option value="">Select...</option>
+                                    <option value="White">White</option>
+                                    <option value="Black or African American">Black or African American</option>
+                                    <option value="Hispanic or Latino">Hispanic or Latino</option>
+                                    <option value="Asian">Asian</option>
+                                    <option value="Two or More Races">Two or More Races</option>
+                                    <option value="Decline">Decline to Identify</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Veteran Status</label>
+                                <select id="veteran">
+                                    <option value="">Select...</option>
+                                    <option value="No">No</option>
+                                    <option value="Yes">Yes</option>
+                                    <option value="Decline">Decline to Identify</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Disability Status</label>
+                                <select id="disability">
+                                    <option value="">Select...</option>
+                                    <option value="No">No</option>
+                                    <option value="Yes">Yes</option>
+                                    <option value="Decline">Decline to Identify</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Work Authorization</label>
+                                <select id="authorization">
+                                    <option value="">Select...</option>
+                                    <option value="Citizen">US Citizen</option>
+                                    <option value="Green Card">Permanent Resident</option>
+                                    <option value="Visa">Visa Sponsorship Needed</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <h3
+                            style="margin-top:30px; margin-bottom: 15px; color: var(--accent-color); font-size: 1rem; text-transform: uppercase; letter-spacing: 0.05em;">
+                            Resume Details</h3>
+
+                        <div class="form-group">
+                            <label>Professional Summary</label>
+                            <textarea id="summary" style="min-height: 100px; line-height: 1.5;"></textarea>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Skills (Comma Separated)</label>
+                            <textarea id="skills" style="min-height: 80px; line-height: 1.5;"></textarea>
+                        </div>
+
+                        <!-- Employment History Section -->
+                        <h3
+                            style="margin-top:30px; margin-bottom: 15px; color: var(--accent-color); font-size: 1rem; text-transform: uppercase; letter-spacing: 0.05em;">
+                            Employment History
+                        </h3>
+                        <div id="experience-list" style="margin-bottom: 20px;">
+                            <!-- Will be populated by JavaScript -->
+                            <p style="color: var(--text-secondary); font-style: italic;">
+                                Employment history will appear here once your resume is parsed.
+                            </p>
+                        </div>
+
+                        <!-- Education Section -->
+                        <h3
+                            style="margin-top:30px; margin-bottom: 15px; color: var(--accent-color); font-size: 1rem; text-transform: uppercase; letter-spacing: 0.05em;">
+                            Education
+                        </h3>
+                        <div id="education-list" style="margin-bottom: 20px;">
+                            <!-- Will be populated by JavaScript -->
+                            <p style="color: var(--text-secondary); font-style: italic;">
+                                Education history will appear here once your resume is parsed.
+                            </p>
+                        </div>
+
+                                                <!-- Hidden raw backup just in case -->
+                        <textarea id="profile_data" class="json-editor" style="display:none;"></textarea>
+
+                        <div
+                            style="text-align: right; margin-top: 30px; border-top: 1px solid var(--border-color); padding-top: 20px;">
+                            <button type="submit" class="btn-primary" id="save-btn"
+                                style="min-width: 150px; padding: 12px 24px; font-size: 1rem;">Save Changes</button>
+                        </div>
+                        <div id="status-msg" style="text-align: right; margin-top: 10px; min-height: 20px;"></div>
+                    </form>
+                </section>
+            </div>
+        </main>
     </div>
 
-    <div class="main-container glass-panel">
-        <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
-            <div>
-                <h1>My Profile</h1>
-                <a href="/" style="color: var(--text-secondary); text-decoration: none;">← Back to Dashboard</a>
-            </div>
-            <div>
-                <button id="logout-btn" class="btn-secondary">Logout</button>
-            </div>
-        </header>
-
-        <section>
-            <div class="action-bar">
-                <div class="form-group" style="flex-grow: 1; margin-right: 20px; margin-bottom: 0;">
-                    <label>Primary Resume</label>
-                    <select id="primary-resume-select">
-                        <option value="">Select a resume...</option>
-                    </select>
-                </div>
-                <div style="display: flex; gap: 10px; align-items: flex-end;">
-                    <button id="parse-btn" class="btn-secondary">✨ Auto-Fill</button>
-                </div>
-            </div>
-
-            <!-- Matches Section (Hidden by default) -->
-            <div id="matches-section"
-                style="display: none; margin-bottom: 30px; padding: 20px; background: rgba(0,0,0,0.3); border-radius: 12px; border: 1px solid var(--glass-border);">
-                <h3>Matched Jobs</h3>
-                <div id="matches-list" style="display: grid; gap: 15px; margin-top: 15px;">
-                    <!-- Job Cards inserted here -->
-                </div>
-            </div>
-
-            <form id="profile-form">
-                <div class="form-grid">
-                    <div class="form-group full-width">
-                        <label>Full Name</label>
-                        <input type="text" id="full_name" placeholder="John Doe">
-                    </div>
-                </div>
-
-                <!-- Contact & Demographics -->
-                <h3 style="margin-top:20px;">Contact & Demographics</h3>
-                <div class="form-grid">
-                    <div class="form-group">
-                        <label>Phone</label>
-                        <input type="text" id="phone" placeholder="+1 555-0123">
-                    </div>
-                    <div class="form-group">
-                        <label>LinkedIn URL</label>
-                        <input type="text" id="linkedin" placeholder="https://linkedin.com/in/...">
-                    </div>
-                    <div class="form-group">
-                        <label>Portfolio / Website</label>
-                        <input type="text" id="portfolio" placeholder="https://myportfolio.com">
-                    </div>
-                    <div class="form-group">
-                        <label>Address (City, State)</label>
-                        <input type="text" id="address" placeholder="San Francisco, CA">
-                    </div>
-
-                    <div class="form-group">
-                        <label>Desired Salary / Expectations</label>
-                        <input type="text" id="salary_expectations" placeholder="e.g. $120k+, Negotiable">
-                    </div>
-
-                    <!-- Extended Demographics -->
-                    <div class="form-group">
-                        <label>Race / Ethnicity</label>
-                        <select id="race">
-                            <option value="">Select...</option>
-                            <option value="White">White</option>
-                            <option value="Black or African American">Black or African American</option>
-                            <option value="Hispanic or Latino">Hispanic or Latino</option>
-                            <option value="Asian">Asian</option>
-                            <option value="Two or More Races">Two or More Races</option>
-                            <option value="Decline">Decline to Identify</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Veteran Status</label>
-                        <select id="veteran">
-                            <option value="">Select...</option>
-                            <option value="No">No</option>
-                            <option value="Yes">Yes</option>
-                            <option value="Decline">Decline to Identify</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Disability Status</label>
-                        <select id="disability">
-                            <option value="">Select...</option>
-                            <option value="No">No</option>
-                            <option value="Yes">Yes</option>
-                            <option value="Decline">Decline to Identify</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Work Authorization</label>
-                        <select id="authorization">
-                            <option value="">Select...</option>
-                            <option value="Citizen">US Citizen</option>
-                            <option value="Green Card">Permanent Resident</option>
-                            <option value="Visa">Visa Sponsorship Needed</option>
-                        </select>
-                    </div>
-                </div>
-
-                <h3>Resume Details</h3>
-
-                <div class="form-group">
-                    <label>Professional Summary
-                        <button type="button" id="generate-summary-btn" class="btn-secondary"
-                            style="font-size:0.7rem; padding: 2px 6px; margin-left:10px;">✨ Generate with AI</button>
-                        <button type="button" id="revert-summary-btn" class="btn-secondary"
-                            style="font-size:0.7rem; padding: 2px 6px; margin-left:5px; display:none; background: rgba(255,255,255,0.1);">↩️
-                            Revert</button>
-                    </label>
-                    <textarea id="summary" style="min-height: 80px;"></textarea>
-                </div>
-
-                <div class="form-group">
-                    <label>Skills (Comma Separated)</label>
-                    <textarea id="skills" style="min-height: 60px;"></textarea>
-                </div>
-
-                <h3>Experience</h3>
-                <div id="experience-container"
-                    style="display:flex; flex-direction:column; gap:15px; margin-bottom:15px;">
-                    <!-- Dynamic Experience Items -->
-                </div>
-                <button type="button" id="add-experience-btn" class="btn-secondary" style="font-size:0.8rem;">+ Add
-                    Position</button>
-
-                <h3 style="margin-top:20px;">Education</h3>
-                <div id="education-container"
-                    style="display:flex; flex-direction:column; gap:15px; margin-bottom:15px;">
-                    <!-- Dynamic Education Items -->
-                </div>
-                <button type="button" id="add-education-btn" class="btn-secondary" style="font-size:0.8rem;">+ Add
-                    Education</button>
-
-                <!-- Hidden raw backup just in case -->
-                <textarea id="profile_data" class="json-editor" style="display:none;"></textarea>
-
-                <div style="text-align: right; margin-top: 20px;">
-                    <button type="submit" class="btn-primary" id="save-btn">Save Changes</button>
-                </div>
-                <div id="status-msg" style="text-align: right; margin-top: 10px; min-height: 20px;"></div>
-            </form>
-        </section>
-    </div>
-
-    <script src="/script.js?v=2"></script>
+    <!-- FontAwesome -->
+    <script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
+    <!-- Use same script -->
+    <script src="/script.js?v=3"></script>
     <script>
         // Init Profile Page specifically
         document.addEventListener('DOMContentLoaded', () => {

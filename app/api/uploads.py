@@ -2,13 +2,20 @@ from typing import List, Dict, Any
 from fastapi import APIRouter, File, UploadFile, HTTPException, Depends
 from app.services.supabase_client import supabase_service
 from app.api.auth import get_current_user
+from app.utils.resume_parser import ResumeParser
+import os
+import json
+import tempfile
 
 router = APIRouter()
 
 ALLOWED_EXTENSIONS = {".pdf", ".docx", ".doc"}
 
+# Initialize Parser
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+parser = ResumeParser(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+
 def validate_extension(filename: str):
-    import os
     ext = os.path.splitext(filename)[1].lower()
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
@@ -23,60 +30,108 @@ async def upload_resume(
 ):
     """
     Uploads a resume file to Supabase storage for the current user.
+    Triggers immediate parsing to populate profile data.
     """
     validate_extension(file.filename)
 
     try:
         content = await file.read()
-
-        # Use user_id from token
         user_id = current_user['id']
+        safe_name = os.path.basename(file.filename)
 
+        # 1. Upload to Storage
         public_url = supabase_service.upload_resume(
             file_content=content,
-            file_name=file.filename,
+            file_name=safe_name,
             user_id=user_id,
             content_type=file.content_type or "application/pdf"
         )
 
-        # Logic: If user has no primary resume, set this one!
-        # Re-fetch user to check (in case token is stale regarding DB state)
-        # Note: Optimization would be to check the 'current_user' dict if we included it there,
-        # but for now a fetch is safer.
-        # Logic: Update Primary Resume & Reset Status
-        # We must fetch the current profile to safely update `profile_data`
+        updates = {}
+        
+        # 2. Trigger Parsing (if parser available)
+        if parser:
+            try:
+                # Save temp for Gemini
+                tmp_path = os.path.join(tempfile.gettempdir(), f"{user_id}_{safe_name}")
+                with open(tmp_path, "wb") as f:
+                    f.write(content)
+                
+                # Parse
+                print(f"🔮 Parsing resume: {safe_name}...")
+                json_str = await parser.parse_to_json(tmp_path)
+                
+                # Cleanup temp
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+
+                # Decode & Transform
+                try:
+                    parsed_data = json.loads(json_str)
+                except json.JSONDecodeError:
+                    import re
+                    match = re.search(r'```json\n(.*?)\n```', json_str, re.DOTALL)
+                    parsed_data = json.loads(match.group(1)) if match else {}
+
+                if parsed_data:
+                    profile_data = parser.map_to_schema(parsed_data)
+                    updates["profile_data"] = profile_data
+                    
+                    # Also update name if found
+                    if "full_name" in parsed_data and parsed_data["full_name"]:
+                         updates["full_name"] = parsed_data["full_name"]
+                    
+                    print(f"✅ Resume parsed successfully. Profile updated.")
+            
+            except Exception as parse_error:
+                print(f"⚠️ Parsing failed: {parse_error}")
+                # We continue to at least save the file association
+
+        # 3. Update User Profile (Primary Resume & Data)
         user_data = supabase_service.get_user_by_email(current_user['email'])
-        if not user_data:
-             # Should not happen given auth
-             pass
-        else:
-            updates = {}
+        if user_data:
             current_profile_data = user_data.get('profile_data') or {}
-
-            # 1. Reset Research Status (Fix for Stale State bug)
+            
+            # Merge updates if we have parsed data
+            # If we don't have updates from parsing, we might still want to reset research status
+            
+            # Reset Research Status
             if 'research_status' in current_profile_data:
-                if file.filename in current_profile_data['research_status']:
-                    # Reset to IDLE or remove
-                    current_profile_data['research_status'][file.filename] = {"status": "IDLE", "updated_at": "now"}
-                    updates["profile_data"] = current_profile_data
+                if safe_name in current_profile_data['research_status']:
+                    current_profile_data['research_status'][safe_name] = {"status": "IDLE", "updated_at": "now"}
+                    # Only add to updates if not already set by parser logic (which replaces profile_data entirely?)
+                    # Wait, parser replaces profile_data. We should be careful not to lose other fields if any?
+                    # Schema says profile_data IS the resume data. So replacing is fine.
+                    # BUT research_status is inside profile_data in the DB model?
+                    # Let's check Supabase model text again:
+                    # "profile_data: JSONB blob containing: ... research_status: Tracking per-resume agent states."
+                    # So if we overwrite profile_data, we LOSE research_status unless we preserve it.
+                    
+                    if "profile_data" in updates:
+                        # Restore research_status to the new object
+                         updates["profile_data"]["research_status"] = current_profile_data.get('research_status', {})
+                         # And reset specific one
+                         updates["profile_data"]["research_status"][safe_name] = {"status": "IDLE", "updated_at": "now"}
+                    else:
+                        # Just updating status
+                        current_profile_data['research_status'][safe_name] = {"status": "IDLE", "updated_at": "now"}
+                        updates["profile_data"] = current_profile_data
 
-            # 2. Auto-set Primary if empty
+            # Auto-set Primary
             if not user_data.get('primary_resume_name'):
-                updates["primary_resume_name"] = file.filename
-                print(f"✅ Auto-set primary resume to: {file.filename}")
+                updates["primary_resume_name"] = safe_name
+                print(f"✅ Auto-set primary resume to: {safe_name}")
 
             if updates:
-                try:
-                    supabase_service.update_user_profile(user_id, updates)
-                except Exception as e:
-                    print(f"⚠️ Failed to update profile metadata: {e}")
+                supabase_service.update_user_profile(user_id, updates)
 
         return {
             "message": "Upload successful",
-            "filename": file.filename,
+            "filename": safe_name,
             "url": public_url
         }
     except Exception as e:
+        print(f"Upload Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/resumes")

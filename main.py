@@ -9,6 +9,7 @@ from app.api.uploads import router as uploads_router
 from app.api.auth import router as auth_router
 from app.api.profile import router as profile_router
 from app.api.agents import router as agents_router
+from app.api.leads import router as leads_router
 
 app = FastAPI(title="Applied Agent UI", description="UI for Resume Management and Agent Control")
 
@@ -26,6 +27,10 @@ app.include_router(auth_router, prefix="/api/auth", tags=["Auth"])
 app.include_router(uploads_router, prefix="/api", tags=["Uploads"])
 app.include_router(profile_router, prefix="/api/profile", tags=["Profile"])
 app.include_router(agents_router, prefix="/api/agents", tags=["Agents"])
+app.include_router(leads_router, prefix="/api/leads", tags=["Leads"])
+
+from app.api.chat import router as chat_router
+app.include_router(chat_router, prefix="/api/chat", tags=["Chat"])
 
 # Mount Static Files
 static_dir = os.path.join(os.path.dirname(__file__), "static")
@@ -47,6 +52,12 @@ async def index_page():
 async def profile_page():
     return FileResponse(os.path.join(static_dir, "profile.html"))
 
+# Explicit route for Jobs
+@app.get("/jobs")
+async def jobs_page():
+    return FileResponse(os.path.join(static_dir, "jobs.html"))
+
+app.mount("/static", StaticFiles(directory=static_dir), name="static_assets")
 app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 
 if __name__ == "__main__":

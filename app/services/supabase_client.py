@@ -437,5 +437,102 @@ class SupabaseService:
             return []
 
 
+    
+    # --- Chat Persistence ---
+    def ensure_chat_tables(self):
+        """
+        Creates chat_sessions and chat_messages tables if they don't exist.
+        (Naive SQL execution via REST or just assume existence if creating manually. 
+         Supabase-py client doesn't support 'create table' easily without RPC or raw SQL.
+         For this demo, we'll assume they exist OR try to create if failure? 
+         Actually, we can use the 'rpc' call if we had a function, or just rely on the user/migration.
+         
+         Better approach for this agent: We'll assume they exist. 
+         If user hasn't created them, we might error. 
+         Let's just try to insert/select and let it fail if missing (logs will show).
+        """
+        pass
+
+    def create_chat_session(self, user_id: int, title: str = "New Chat"):
+        """
+        Creates a new chat session.
+        """
+        if not self.client: return None
+        try:
+            data = {"user_id": user_id, "title": title}
+            # 'chat_sessions' table must exist: id (serial), user_id (int), title (text), created_at (ts)
+            response = self.client.table("chat_sessions").insert(data).execute()
+            if response.data:
+                return response.data[0]
+            return None
+        except Exception as e:
+            print(f"❌ Create Chat Session Error: {e}")
+            return None
+
+    def update_chat_session_title(self, session_id: int, title: str):
+        """
+        Updates the title of a chat session.
+        """
+        if not self.client: return None
+        try:
+            response = self.client.table("chat_sessions")\
+                .update({"title": title})\
+                .eq("id", session_id)\
+                .execute()
+            if response.data:
+                return response.data[0]
+            return None
+        except Exception as e:
+            print(f"❌ Update Chat Session Error: {e}")
+            return None
+
+    def get_chat_sessions(self, user_id: int):
+        """
+        Fetches all chat sessions for a user, ordered by recent.
+        """
+        if not self.client: return []
+        try:
+            response = self.client.table("chat_sessions")\
+                .select("*")\
+                .eq("user_id", user_id)\
+                .order("created_at", desc=True)\
+                .execute()
+            return response.data
+        except Exception as e:
+            print(f"❌ Get Chat Sessions Error: {e}")
+            return []
+
+    def save_chat_message(self, session_id: int, role: str, content: str):
+        """
+        Saves a message to a session.
+        """
+        if not self.client: return
+        try:
+            data = {
+                "session_id": session_id,
+                "role": role,
+                "content": content
+            }
+            # 'chat_messages' table: id, session_id, role, content, created_at
+            self.client.table("chat_messages").insert(data).execute()
+        except Exception as e:
+            print(f"❌ Save Chat Message Error: {e}")
+
+    def get_chat_history(self, session_id: int):
+        """
+        Get all messages for a session.
+        """
+        if not self.client: return []
+        try:
+            response = self.client.table("chat_messages")\
+                .select("*")\
+                .eq("session_id", session_id)\
+                .order("created_at", desc=False)\
+                .execute()
+            return response.data
+        except Exception as e:
+            print(f"❌ Get Chat History Error: {e}")
+            return []
+
 # Singleton instance
 supabase_service = SupabaseService()

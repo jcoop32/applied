@@ -142,65 +142,7 @@ async def parse_resume(
                  parsed_data = {"raw_text": json_str}
 
         # --- Data Transformation (Flat -> Profile Schema) ---
-        transformed_data = {
-            "contact_info": {
-                "phone": parsed_data.get("phone", ""),
-                "linkedin": parsed_data.get("linkedin", ""),
-                "portfolio": parsed_data.get("website", ""),
-                "address": parsed_data.get("location", "")
-            },
-            "summary": parsed_data.get("summary", ""),
-            "skills": parsed_data.get("skills", []),
-            "experience": [],
-            "education": []
-        }
-
-        # Map Experience
-        # LLM output keys: company, title, start_date, end_date, description
-        # UI expects: company, title, duration, responsibilities
-        raw_exp = parsed_data.get("work_experience", [])
-        for item in raw_exp:
-            start_str = item.get('start_date', '')
-            end_str = item.get('end_date', '')
-            
-            start_p = parse_date_string(start_str)
-            end_p = parse_date_string(end_str)
-            
-            # Construct legacy duration string for backward compatibility
-            duration = f"{start_str} - {end_str}"
-            
-            transformed_data["experience"].append({
-                "company": item.get("company", ""),
-                "title": item.get("title", ""),
-                "duration": duration.strip(" - "),
-                "responsibilities": item.get("description", ""),
-                # New Structured Fields
-                "start_month": start_p.get("month", ""),
-                "start_year": start_p.get("year", ""),
-                "end_month": end_p.get("month", ""),
-                "end_year": end_p.get("year", ""),
-                "is_current": end_p.get("is_current", False) or False
-            })
-
-        # Map Education
-        # LLM output keys: school, degree, graduation_year
-        # UI expects: school, degree, date
-        raw_edu = parsed_data.get("education", [])
-        for item in raw_edu:
-            grad_year = item.get('graduation_year', '')
-            # Parse graduation year as end_year
-            # Usually strict year "2023"
-            
-            end_p = parse_date_string(grad_year)
-            
-            transformed_data["education"].append({
-                "school": item.get("school", ""),
-                "degree": item.get("degree", ""),
-                "date": grad_year,
-                # New Structured Fields
-                "end_year": end_p.get("year", grad_year if grad_year.isdigit() else ""),
-                "end_month": end_p.get("month", "") # Usually empty for grad year
-            })
+        transformed_data = parser.map_to_schema(parsed_data)
 
         # 6. Auto-Save to Profile
         # We also want to update the root full_name if found
