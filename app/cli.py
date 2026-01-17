@@ -42,13 +42,14 @@ async def main():
             location = payload.get("location")
             job_title = payload.get("job_title")
             location = payload.get("location")
+            session_id = payload.get("session_id")
 
             if not user_id or not resume_filename:
                 logger.error("Missing user_id or resume_filename")
                 sys.exit(1)
 
-            logger.info(f"Starting Research Task: User={user_id}, Resume={resume_filename}, Limit={limit}, Title={job_title}, Loc={location}, Type=Google")
-            await run_research_pipeline(user_id, resume_filename, api_key, limit, job_title, location)
+            logger.info(f"Starting Research Task: User={user_id}, Resume={resume_filename}, Limit={limit}, Title={job_title}, Loc={location}, Session={session_id}, Type=Google")
+            await run_research_pipeline(user_id, resume_filename, api_key, limit, job_title, location, session_id=session_id)
 
         elif args.task == "apply":
             user_id = payload.get("user_id") # Needed for resume path construction if redundant

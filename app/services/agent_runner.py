@@ -138,6 +138,12 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
         if session_id:
             supabase_service.save_chat_message(session_id, "model", f"✅ Research Complete! Found **{len(scored_matches)}** matches.\n\nCheck the **Jobs** tab or reload your dashboard.")
 
+    except asyncio.CancelledError:
+        print(f"🛑 Worker: Research Cancelled for {resume_filename}")
+        if session_id:
+            supabase_service.save_chat_message(session_id, "model", "🛑 Research Cancelled by user.")
+        update_research_status(user_id, resume_filename, "CANCELLED")
+        
     except Exception as e:
         print(f"❌ Worker: Research Failed: {e}")
         if session_id:
@@ -203,6 +209,13 @@ async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, a
              
              print(f"✅ Final Status Verdict: {final_status}")
              supabase_service.update_lead_status(lead_id, final_status, user_id=user_id, resume_filename=resume_filename)
+
+    except asyncio.CancelledError:
+        print(f"🛑 Worker: Applier Cancelled for {job_url}")
+        if session_id:
+            supabase_service.save_chat_message(session_id, "model", "🛑 Application Cancelled by user.")
+        if lead_id:
+            supabase_service.update_lead_status(lead_id, "CANCELLED", user_id=user_id, resume_filename=resume_filename)
 
     except Exception as e:
         print(f"❌ Worker: Applier Failed: {e}")

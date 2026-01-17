@@ -14,44 +14,13 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 from app.services.agent_runner import run_research_pipeline, update_research_status, run_applier_task
-
+from app.services.github import dispatch_github_action
+from app.services.task_manager import task_manager
+import asyncio
 
 # --- Routes ---
 
-import httpx
-
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-GITHUB_REPO_OWNER = os.getenv("GITHUB_REPO_OWNER")
-GITHUB_REPO_NAME = os.getenv("GITHUB_REPO_NAME")
 USE_GITHUB_ACTIONS = os.getenv("USE_GITHUB_ACTIONS", "true").lower() == "true"
-
-async def dispatch_github_action(workflow_file: str, task: str, payload: dict):
-    if not GITHUB_TOKEN or not GITHUB_REPO_OWNER or not GITHUB_REPO_NAME:
-        logger.warning("GitHub configuration missing. Falling back to local execution (if applicable) or failing.")
-        return False
-
-    url = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/actions/workflows/{workflow_file}/dispatches"
-    headers = {
-        "Authorization": f"Bearer {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github.v3+json"
-    }
-
-    # Payload must be a string for the input
-    data = {
-        "ref": "main", # Or current branch
-        "inputs": {
-            "task": task,
-            "payload": json.dumps(payload)
-        }
-    }
-
-    async with httpx.AsyncClient() as client:
-        response = await client.post(url, headers=headers, json=data)
-        if response.status_code != 204:
-            logger.error(f"Failed to dispatch GitHub Action {workflow_file}: {response.text}")
-            return False
-
-    return True
 
 @router.post("/research")
 async def trigger_research(
@@ -114,17 +83,20 @@ async def trigger_research(
     if not api_key:
         raise HTTPException(status_code=503, detail="Server misconfiguration: No API Key")
 
-    background_tasks.add_task(
-        run_research_pipeline,
-        user_id=user_id,
-        resume_filename=resume_filename,
-        api_key=api_key,
-        limit=limit,
-        job_title=job_title,
-        location=location,
-        researcher_type=researcher_type,
-        session_id=session_id
+    # Use asyncio task instead of BackgroundTasks to allow cancellation
+    task = asyncio.create_task(
+        run_research_pipeline(
+            user_id=user_id,
+            resume_filename=resume_filename,
+            api_key=api_key,
+            limit=limit,
+            job_title=job_title,
+            location=location,
+            session_id=session_id
+        )
     )
+    if session_id:
+        task_manager.register_task(str(session_id), task)
 
     return {"message": "Research started (Local)", "status": "SEARCHING", "session_id": session_id}
 
@@ -254,7 +226,6 @@ async def trigger_apply(
     # If local fallback:
     async def _download_and_apply():
         # session_id passed from outer scope
-        pass # placeholder to keep indentation logic clear, we just use session_id from above
         
         # 1. Download Resume
         try:
@@ -272,6 +243,11 @@ async def trigger_apply(
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
 
+        except asyncio.CancelledError:
+             # Handle outer cancellation if wrapper is cancelled
+             print(f"🛑 Wrapper: Applier Cancelled for {job_url}")
+             supabase_service.save_chat_message(session_id, "model", "🛑 Application Cancelled by user.")
+
         except Exception as e:
             print(f"❌ Apply Wrapper Failed: {e}")
             # Try to revert status if possible?
@@ -279,6 +255,25 @@ async def trigger_apply(
             if session_id:
                 supabase_service.save_chat_message(session_id, "model", f"❌ Application Failed: {e}")
 
-    background_tasks.add_task(_download_and_apply)
+    # Launch task
+    task = asyncio.create_task(_download_and_apply())
+    if session_id:
+         task_manager.register_task(str(session_id), task)
 
     return {"message": "Application started (Local)"}
+
+@router.post("/cancel/{session_id}")
+async def cancel_agent_task(
+    session_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Cancels a running agent task associated with the session_id.
+    """
+    success = await task_manager.cancel_task(session_id)
+    if success:
+        return {"message": "Task cancellation requested."}
+    else:
+        # It might be finished or never existed locally (e.g. GHA)
+        # We return 200 anyway to not break UI
+        return {"message": "Task not found or already finished."}

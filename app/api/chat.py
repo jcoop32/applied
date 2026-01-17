@@ -135,20 +135,53 @@ async def chat_message(
             
             # Trigger Research Pipeline
             from app.services.agent_runner import run_research_pipeline, update_research_status
+            from app.services.github import dispatch_github_action
             
             # Update Status immediately
             update_research_status(user_id, resume_filename, "SEARCHING")
+
+            # Check for GHA Execution
+            use_gha = os.getenv("USE_GITHUB_ACTIONS", "false").lower() == "true"
             
-            background_tasks.add_task(
-                run_research_pipeline,
-                user_id=user_id,
-                resume_filename=resume_filename,
-                api_key=api_key,
-                limit=limit,
-                job_title=job_title,
-                location=location,
-                session_id=session_id
-            )
+            if use_gha:
+                print(f"🚀 Dispatching Research via GitHub Actions for {resume_filename}")
+                payload = {
+                    "user_id": user_id,
+                    "resume_filename": resume_filename,
+                    "limit": limit,
+                    "job_title": job_title,
+                    "location": location,
+                    "session_id": session_id
+                }
+                success = await dispatch_github_action("research_agent.yml", "research", payload)
+                
+                if success:
+                    supabase_service.save_chat_message(session_id, "model", f"🚀 Research agent dispatched to cloud runner for **{resume_filename}**. You will see results here shortly.")
+                else:
+                    response_text += "\n\n(⚠️ Failed to start Cloud Agent. Falling back to local runner...)"
+                    # Fallback to local
+                    background_tasks.add_task(
+                        run_research_pipeline,
+                        user_id=user_id,
+                        resume_filename=resume_filename,
+                        api_key=api_key,
+                        limit=limit,
+                        job_title=job_title,
+                        location=location,
+                        session_id=session_id
+                    )
+            else:
+                # Local Execution
+                background_tasks.add_task(
+                    run_research_pipeline,
+                    user_id=user_id,
+                    resume_filename=resume_filename,
+                    api_key=api_key,
+                    limit=limit,
+                    job_title=job_title,
+                    location=location,
+                    session_id=session_id
+                )
 
         elif action["type"] == "apply":
             args = action["payload"]

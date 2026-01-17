@@ -579,8 +579,14 @@ async function triggerResearch() {
         });
 
         if (res.ok) {
+            const data = await res.json();
             // Start Polling
             pollResearchStatus(resumeName);
+
+            // Show Cancel Button if we have a session ID
+            if (data.session_id) {
+                addCancelButtonMessage(data.session_id);
+            }
         }
     } catch (e) {
         addMessage("model", "❌ Error starting research.");
@@ -789,6 +795,10 @@ async function triggerApply(url, title, mode = null) {
                 msg += `\n\n🔗 **Watch Live**: [View Session](${data.session_url})`;
             }
             addMessage("model", msg);
+
+            if (data.session_id) {
+                addCancelButtonMessage(data.session_id);
+            }
         } else {
             addMessage("model", "❌ Failed to start application.");
         }
@@ -1290,31 +1300,35 @@ sendMessage = async function () {
     const text = chatInput.value.trim();
 
     // Regex to detect "Apply to @..." command
-    // Accepts: Apply to @JobTitle ...
     if (text.toLowerCase().startsWith("apply to @")) {
         try {
+            console.log("Intercepted Apply Command:", text);
+
             // Try to identify the job
             // 1. Check window.lastMentionedJob (most reliable if user clicked dropdown)
             let job = window.lastMentionedJob;
 
             // 2. If not set, try to fuzzy match from text
             if (!job && Array.isArray(availableLeads)) {
-                // Extract title: "Apply to @Software Engineer at Google"
-                // Remove "Apply to @"
-                let raw = text.substring(9);
-                // This is loose, but let's try to match against availableLeads
-                job = availableLeads.find(l => raw.toLowerCase().includes(l.title.toLowerCase()));
+                let raw = text.substring(9).trim(); // Remove "apply to @" and trim
+
+                // Try Exact Match first (case-insensitive)
+                job = availableLeads.find(l => l.title && l.title.toLowerCase() === raw.toLowerCase());
+
+                // Fallback to fuzzy includes
+                if (!job) {
+                    job = availableLeads.find(l => l.title && raw.toLowerCase().includes(l.title.toLowerCase()));
+                }
             }
 
             if (job) {
-                // Open Modal instead of sending
+                console.log("Job identified for apply:", job);
+
                 // Clear input first to show we consumed it
                 chatInput.value = "";
                 chatInput.style.height = "auto";
 
-                // Open Unified Modal
-                // We need to pass the resume context too.
-                // We fetch profile to get the preferred resume, but don't block hard on it
+                // Get Resume Context
                 let resumeName = null;
                 try {
                     const profileRes = await authFetch(`${API_BASE}/profile`);
@@ -1328,6 +1342,11 @@ sendMessage = async function () {
 
                 await openApplyModal(job, resumeName);
                 return;
+            } else {
+                console.warn("Could not identify job from text:", text);
+                // Optional: Show toast "Could not find job"? 
+                // For now, let it fall through or maybe just alert?
+                // Falling through means it goes to Chat LLM, which might be fine.
             }
         } catch (e) {
             console.error("Error in Apply Interception:", e);
@@ -1547,6 +1566,10 @@ async function confirmApplyToChat() {
             let msg = "✅ Application started.";
             if (data.session_url) msg += `\n\n🔗 [Watch Live](${data.session_url})`;
             addMessage("model", msg);
+
+            if (data.session_id) {
+                addCancelButtonMessage(data.session_id);
+            }
         } else {
             addMessage("model", "❌ Failed to start application.");
         }
