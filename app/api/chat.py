@@ -81,7 +81,88 @@ async def chat_message(
     # 2. Save User Message
     supabase_service.save_chat_message(session_id, "user", payload.message)
 
-    # 3. Fetch History (from DB)
+    # 3. APPLY INTENT DETECTION - Check if message is an apply request
+    import re
+    apply_pattern = r'^Apply to @(.+?) at (.+?) using resume \[(.+?)\]'
+    url_pattern = r'Job URL:\s*(https?://\S+)'
+    
+    apply_match = re.search(apply_pattern, payload.message, re.IGNORECASE)
+    
+    if apply_match:
+        job_title = apply_match.group(1).strip()
+        company = apply_match.group(2).strip()
+        resume_name = apply_match.group(3).strip()
+        
+        # Extract job URL
+        url_match = re.search(url_pattern, payload.message)
+        job_url = url_match.group(1).strip() if url_match else None
+        
+        if job_url:
+            # Extract additional instructions (optional)
+            instructions_match = re.search(r'Additional instructions:\s*(.+)', payload.message, re.DOTALL | re.IGNORECASE)
+            additional_instructions = instructions_match.group(1).strip() if instructions_match else ""
+            
+            # Trigger the applier agent
+            from app.services.agent_runner import run_applier_task
+            from fastapi import BackgroundTasks
+            
+            # Get profile data for applier
+            user_data = supabase_service.get_user_by_email(current_user['email'])
+            profile_blob = user_data.get('profile_data', {})
+            if 'email' not in profile_blob:
+                profile_blob['email'] = current_user['email']
+            if 'full_name' not in profile_blob and user_data.get('full_name'):
+                profile_blob['full_name'] = user_data.get('full_name')
+            
+            # Add additional instructions to profile for applier to use
+            if additional_instructions:
+                profile_blob['apply_instructions'] = additional_instructions
+            
+            # Mark lead as IN_PROGRESS
+            supabase_service.update_lead_status_by_url(user_id, job_url, "IN_PROGRESS", resume_filename=resume_name)
+            
+            # Download resume and run applier in background
+            import asyncio
+            async def _run_apply():
+                try:
+                    remote_path = f"{user_id}/{resume_name}"
+                    file_bytes = supabase_service.download_file(remote_path)
+                    
+                    tmp_path = f"/tmp/apply_{user_id}_{resume_name}"
+                    with open(tmp_path, "wb") as f:
+                        f.write(file_bytes)
+                    
+                    await run_applier_task(job_url, tmp_path, profile_blob, api_key, resume_filename=resume_name, use_cloud=True)
+                    
+                    # Cleanup
+                    if os.path.exists(tmp_path):
+                        os.remove(tmp_path)
+                except Exception as e:
+                    print(f"❌ Apply via Chat Failed: {e}")
+                    supabase_service.update_lead_status_by_url(user_id, job_url, "FAILED")
+            
+            # Schedule the apply task
+            asyncio.create_task(_run_apply())
+            
+            # Generate response confirming the application started
+            response_text = f"""🚀 **Starting Application!**
+
+I'm now applying to **{job_title}** at **{company}** using your resume **{resume_name}**.
+
+{"**Additional Instructions:** " + additional_instructions if additional_instructions else ""}
+
+The application is running in the background. You can check the status in the **Jobs** tab. I'll do my best to complete all the forms and answer any questions based on your profile data."""
+            
+            # Save bot response
+            supabase_service.save_chat_message(session_id, "model", response_text)
+            
+            return {
+                "role": "model",
+                "content": response_text,
+                "session_id": session_id
+            }
+
+    # 4. Fetch History (from DB) - if not an apply intent, proceed with normal chat
     db_history = supabase_service.get_chat_history(session_id)
     # Convert to format agent expects: [{'role': 'user'/'model', 'content': '...'}]
     # db has 'role', 'content'
@@ -119,7 +200,7 @@ async def chat_message(
         history=prev_history
     )
     
-    # 4. Save Bot Response
+    # 5. Save Bot Response
     supabase_service.save_chat_message(session_id, "model", response_text)
     
     return {
@@ -127,3 +208,4 @@ async def chat_message(
         "content": response_text, 
         "session_id": session_id 
     }
+

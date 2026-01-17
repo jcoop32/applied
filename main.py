@@ -10,6 +10,7 @@ from app.api.auth import router as auth_router
 from app.api.profile import router as profile_router
 from app.api.agents import router as agents_router
 from app.api.leads import router as leads_router
+from app.api.chat import router as chat_router
 
 app = FastAPI(title="Applied Agent UI", description="UI for Resume Management and Agent Control")
 
@@ -28,8 +29,6 @@ app.include_router(uploads_router, prefix="/api", tags=["Uploads"])
 app.include_router(profile_router, prefix="/api/profile", tags=["Profile"])
 app.include_router(agents_router, prefix="/api/agents", tags=["Agents"])
 app.include_router(leads_router, prefix="/api/leads", tags=["Leads"])
-
-from app.api.chat import router as chat_router
 app.include_router(chat_router, prefix="/api/chat", tags=["Chat"])
 
 # Mount Static Files

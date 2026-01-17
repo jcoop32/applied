@@ -93,8 +93,13 @@ function initChatPage() {
     const sidebarGroup = document.querySelector(".sidebar .menu-group");
     if (sidebarGroup) sidebarGroup.appendChild(sessionListContainer);
 
-    // Load Sessions
-    loadSessions();
+    // Load Sessions, then restore last active session
+    loadSessions().then(() => {
+        const savedSessionId = localStorage.getItem('currentChatSessionId');
+        if (savedSessionId) {
+            loadSession(savedSessionId);
+        }
+    });
 
     // Check Researcher Visibility
     checkResearcherVisibility();
@@ -129,6 +134,20 @@ function initChatPage() {
     window.triggerApply = triggerApply;
 
     initAttachResume();
+
+    // Check for pending apply prompt from Jobs page
+    const pendingPrompt = localStorage.getItem('pendingApplyPrompt');
+    if (pendingPrompt) {
+        const chatInput = document.getElementById('chat-input');
+        const sendBtn = document.getElementById('send-btn');
+        if (chatInput) {
+            chatInput.value = pendingPrompt;
+            chatInput.style.height = 'auto';
+            chatInput.style.height = (chatInput.scrollHeight) + 'px';
+            if (sendBtn) sendBtn.disabled = false;
+        }
+        localStorage.removeItem('pendingApplyPrompt');
+    }
 }
 
 // --- Chat Sessions ---
@@ -231,6 +250,7 @@ async function renameSession(sessionId, oldTitle) {
 async function startNewChat() {
     // CRITICAL: Reset session ID first to ensure next message creates new session
     currentSessionId = null;
+    localStorage.removeItem('currentChatSessionId');
 
     const container = document.getElementById("messages-container");
     if (container) {
@@ -255,6 +275,7 @@ async function startNewChat() {
 
 async function loadSession(sessionId) {
     currentSessionId = sessionId;
+    localStorage.setItem('currentChatSessionId', sessionId);
     const container = document.getElementById("messages-container");
     if (!container) return;
     container.innerHTML = ""; // Clear current
@@ -357,6 +378,7 @@ async function sendMessage() {
         // Update Session ID if new
         if (!currentSessionId && data.session_id) {
             currentSessionId = data.session_id;
+            localStorage.setItem('currentChatSessionId', data.session_id);
             loadSessions(); // Refresh list to show new chat
         }
 
@@ -537,25 +559,25 @@ async function initProfilePage() {
     if (autoFillBtn) {
         autoFillBtn.addEventListener("click", async (e) => {
             e.preventDefault();
-            
+
             const resumeSelect = document.getElementById("primary-resume-select");
             const selectedResume = resumeSelect.value;
-            
+
             if (!selectedResume) {
                 alert("Please select a resume first.");
                 return;
             }
-            
+
             autoFillBtn.disabled = true;
             autoFillBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Parsing...';
-            
+
             try {
                 const res = await authFetch(`${API_BASE}/profile/parse`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ resume_path: selectedResume })
                 });
-                
+
                 if (res.ok) {
                     // Reload the page to show updated data
                     window.location.reload();
@@ -568,6 +590,62 @@ async function initProfilePage() {
             } finally {
                 autoFillBtn.disabled = false;
                 autoFillBtn.innerHTML = '<i class="fas fa-magic"></i> Auto-Fill from Resume';
+            }
+        });
+    }
+
+    // Handle Profile Form Submission
+    const profileForm = document.getElementById("profile-form");
+    if (profileForm) {
+        profileForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+
+            const saveBtn = document.getElementById("save-btn");
+            const statusMsg = document.getElementById("status-msg");
+
+            // Collect form data
+            const formData = {
+                full_name: document.getElementById("full_name")?.value || "",
+                profile_data: {
+                    name: document.getElementById("full_name")?.value || "",
+                    phone: document.getElementById("phone")?.value || "",
+                    linkedin: document.getElementById("linkedin")?.value || "",
+                    portfolio: document.getElementById("portfolio")?.value || "",
+                    address: document.getElementById("address")?.value || "",
+                    summary: document.getElementById("summary")?.value || "",
+                    skills: document.getElementById("skills")?.value ?
+                        document.getElementById("skills").value.split(",").map(s => s.trim()) : [],
+                    salary_expectations: document.getElementById("salary_expectations")?.value || "",
+                    race: document.getElementById("race")?.value || "",
+                    veteran: document.getElementById("veteran")?.value || "",
+                    disability: document.getElementById("disability")?.value || "",
+                    authorization: document.getElementById("authorization")?.value || ""
+                }
+            };
+
+            // Disable button
+            saveBtn.disabled = true;
+            saveBtn.textContent = "Saving...";
+
+            try {
+                const res = await authFetch(`${API_BASE}/profile`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(formData)
+                });
+
+                if (res.ok) {
+                    statusMsg.innerHTML = '<span style="color: var(--accent-color);">✅ Profile saved successfully!</span>';
+                    setTimeout(() => statusMsg.innerHTML = "", 3000);
+                } else {
+                    statusMsg.innerHTML = '<span style="color: #ff6b6b;">❌ Failed to save profile</span>';
+                }
+            } catch (e) {
+                console.error("Save error:", e);
+                statusMsg.innerHTML = '<span style="color: #ff6b6b;">❌ Error saving profile</span>';
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.textContent = "Save Changes";
             }
         });
     }
@@ -836,7 +914,7 @@ async function loadJobs(resumeName) {
     if (!resumeName) return;
 
     try {
-        const url = `${API_BASE}/leads?resume=${encodeURIComponent(resumeName)}`;
+        const url = `${API_BASE}/leads/?resume=${encodeURIComponent(resumeName)}`;
         const res = await authFetch(url);
         const data = await res.json();
 
@@ -864,12 +942,18 @@ async function loadJobs(resumeName) {
                     <span class="match-score">${lead.match_score}% Match</span>
                     <span class="status-pill ${statusClass}">${lead.status}</span>
                     <div class="actions">
-                        <a href="${lead.url}" target="_blank" class="btn-secondary" style="padding: 6px 12px; font-size: 0.8rem; text-decoration:none;">
-                            Apply <i class="fas fa-external-link-alt"></i>
-                        </a>
+                        <button class="apply-chat-btn" data-lead-id="${lead.id}" style="padding: 6px 12px; font-size: 0.8rem; background: var(--accent-color); color: #000; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
+                            Apply <i class="fas fa-paper-plane"></i>
+                        </button>
                     </div>
                 </div>
             `;
+
+            // Add click handler for Apply button
+            const applyBtn = div.querySelector('.apply-chat-btn');
+            if (applyBtn) {
+                applyBtn.addEventListener('click', () => openApplyModal(lead, resumeName));
+            }
             container.appendChild(div);
         });
 
@@ -877,4 +961,201 @@ async function loadJobs(resumeName) {
         console.error("Error loading jobs", e);
         container.innerHTML = "<p style='text-align:center;'>Error loading leads.</p>";
     }
+}
+
+// ==========================================
+// APPLY MODAL LOGIC (Jobs Page)
+// ==========================================
+
+// Initialize Apply Modal (called from initJobsPage)
+function initApplyModal() {
+    const modal = document.getElementById('apply-modal');
+    const closeBtn = document.querySelector('.close-apply-modal');
+    const confirmBtn = document.getElementById('apply-confirm-btn');
+    const uploadBtn = document.getElementById('apply-upload-btn');
+    const uploadInput = document.getElementById('apply-resume-upload');
+
+    if (closeBtn && modal) {
+        closeBtn.addEventListener('click', () => {
+            modal.style.display = 'none';
+        });
+    }
+
+    // Close on outside click
+    if (modal) {
+        window.addEventListener('click', (event) => {
+            if (event.target === modal) {
+                modal.style.display = 'none';
+            }
+        });
+    }
+
+    if (confirmBtn) {
+        confirmBtn.addEventListener('click', confirmApplyToChat);
+    }
+
+    if (uploadBtn && uploadInput) {
+        uploadBtn.addEventListener('click', () => uploadInput.click());
+        uploadInput.addEventListener('change', handleApplyResumeUpload);
+    }
+}
+
+// Open Apply Modal with job data
+async function openApplyModal(lead, contextResumeName) {
+    const modal = document.getElementById('apply-modal');
+    const titleEl = document.getElementById('apply-job-title');
+    const companyEl = document.getElementById('apply-job-company');
+    const resumeSelect = document.getElementById('apply-resume-select');
+    const instructionsEl = document.getElementById('apply-instructions');
+    const uploadStatus = document.getElementById('apply-upload-status');
+
+    if (!modal) return;
+
+    // Store lead data for later use
+    window.pendingApplyJob = {
+        title: lead.title,
+        company: lead.company,
+        url: lead.url,
+        contextResume: contextResumeName
+    };
+
+    // Populate job info
+    if (titleEl) titleEl.textContent = lead.title;
+    if (companyEl) companyEl.textContent = lead.company;
+    if (instructionsEl) instructionsEl.value = '';
+    if (uploadStatus) uploadStatus.textContent = '';
+
+    // Populate resume dropdown
+    if (resumeSelect) {
+        resumeSelect.innerHTML = '<option value="">Loading...</option>';
+
+        try {
+            const res = await authFetch(`${API_BASE}/resumes`);
+            const resumes = await res.json();
+
+            resumeSelect.innerHTML = '';
+
+            if (!Array.isArray(resumes) || resumes.length === 0) {
+                resumeSelect.innerHTML = '<option value="">No resumes found</option>';
+            } else {
+                resumes.forEach(r => {
+                    const opt = document.createElement('option');
+                    opt.value = r.name;
+                    opt.textContent = r.name;
+                    // Pre-select the resume that was used when finding this lead
+                    if (r.name === contextResumeName) {
+                        opt.selected = true;
+                    }
+                    resumeSelect.appendChild(opt);
+                });
+            }
+        } catch (e) {
+            console.error('Error loading resumes for apply modal', e);
+            resumeSelect.innerHTML = '<option value="">Error loading resumes</option>';
+        }
+    }
+
+    // Show modal
+    modal.style.display = 'block';
+
+    // Initialize modal event listeners if not already done
+    if (!modal.dataset.initialized) {
+        initApplyModal();
+        modal.dataset.initialized = 'true';
+    }
+}
+
+// Build prompt and navigate to chat
+function confirmApplyToChat() {
+    const job = window.pendingApplyJob;
+    if (!job) {
+        alert('No job selected');
+        return;
+    }
+
+    const resumeSelect = document.getElementById('apply-resume-select');
+    const instructionsEl = document.getElementById('apply-instructions');
+
+    const selectedResume = resumeSelect?.value || '';
+    const instructions = instructionsEl?.value?.trim() || '';
+
+    if (!selectedResume) {
+        alert('Please select a resume');
+        return;
+    }
+
+    // Build the structured prompt
+    let prompt = `Apply to @${job.title} at ${job.company} using resume [${selectedResume}].
+
+Job URL: ${job.url}`;
+
+    if (instructions) {
+        prompt += `
+
+Additional instructions:
+${instructions}`;
+    }
+
+    // Save to localStorage for chat page pickup
+    localStorage.setItem('pendingApplyPrompt', prompt);
+
+    // Close modal and navigate to chat
+    const modal = document.getElementById('apply-modal');
+    if (modal) modal.style.display = 'none';
+
+    window.location.href = '/';
+}
+
+// Handle resume upload within the apply modal
+async function handleApplyResumeUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const uploadStatus = document.getElementById('apply-upload-status');
+    const resumeSelect = document.getElementById('apply-resume-select');
+
+    if (uploadStatus) uploadStatus.textContent = 'Uploading...';
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const token = localStorage.getItem('token');
+
+    try {
+        const res = await fetch(`${API_BASE}/upload`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` },
+            body: formData
+        });
+
+        if (res.ok) {
+            if (uploadStatus) uploadStatus.textContent = `✅ Uploaded: ${file.name}`;
+
+            // Refresh the resume dropdown and select the new file
+            const resumesRes = await authFetch(`${API_BASE}/resumes`);
+            const resumes = await resumesRes.json();
+
+            if (resumeSelect && Array.isArray(resumes)) {
+                resumeSelect.innerHTML = '';
+                resumes.forEach(r => {
+                    const opt = document.createElement('option');
+                    opt.value = r.name;
+                    opt.textContent = r.name;
+                    // Select the newly uploaded file
+                    if (r.name === file.name) {
+                        opt.selected = true;
+                    }
+                    resumeSelect.appendChild(opt);
+                });
+            }
+        } else {
+            if (uploadStatus) uploadStatus.textContent = '❌ Upload failed';
+        }
+    } catch (err) {
+        console.error('Upload error', err);
+        if (uploadStatus) uploadStatus.textContent = '❌ Upload error';
+    }
+
+    // Clear the input
+    e.target.value = '';
 }
