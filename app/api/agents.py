@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Body
 from app.api.auth import get_current_user
 from app.services.supabase_client import supabase_service
-from app.agents.researcher import ResearcherAgent
+
 from app.agents.matcher import MatcherAgent
 from app.agents.applier import ApplierAgent
 from app.services.agent_runner import run_research_pipeline, update_research_status
@@ -66,7 +66,7 @@ async def trigger_research(
     limit = payload.get("limit", 20)
     job_title = payload.get("job_title") # Optional Manual Override
     location = payload.get("location")   # Optional Manual Override
-    researcher_type = payload.get("researcher_type", "getwork")
+
 
     # Cap limit
     if limit > 99: limit = 99
@@ -81,6 +81,17 @@ async def trigger_research(
     # Update status to SEARCHING immediately for UI responsiveness
     update_research_status(user_id, resume_filename, "SEARCHING")
 
+    # Create Persistent Chat Session (Always, for visibility)
+    # Note: If GHA runs, it might not log to this session unless configured, 
+    # but at least the user sees "Research: ..." in their list.
+    session_title = f"Research: {resume_filename}"
+    chat_session = supabase_service.create_chat_session(user_id, session_title)
+    session_id = chat_session['id'] if chat_session else None
+
+    # Immediate feedback in Chat
+    if session_id:
+        supabase_service.save_chat_message(session_id, "model", f"🕵️ Research session initialized for **{resume_filename}**. Starting agent...")
+
     # Dispatch
     if USE_GITHUB_ACTIONS:
         action_payload = {
@@ -89,12 +100,12 @@ async def trigger_research(
             "limit": limit,
             "job_title": job_title,
             "location": location,
-            "researcher_type": researcher_type
+            "session_id": session_id # Pass session ID to GHA
         }
         success = await dispatch_github_action("research_agent.yml", "research", action_payload)
 
         if success:
-            return {"message": "Research started (GitHub Action)", "status": "SEARCHING"}
+            return {"message": "Research started (GitHub Action)", "status": "SEARCHING", "session_id": session_id}
         else:
             # Fallback to local?
             pass
@@ -111,10 +122,11 @@ async def trigger_research(
         limit=limit,
         job_title=job_title,
         location=location,
-        researcher_type=researcher_type
+        researcher_type=researcher_type,
+        session_id=session_id
     )
 
-    return {"message": "Research started (Local)", "status": "SEARCHING"}
+    return {"message": "Research started (Local)", "status": "SEARCHING", "session_id": session_id}
 
 @router.get("/matches")
 async def get_matches(
@@ -207,16 +219,26 @@ async def trigger_apply(
             should_dispatch_github = True
         # else local/standard
 
+    # Create Persistent Chat Session (Always)
+    session_title = f"Apply: {job_url}"
+    chat_session = supabase_service.create_chat_session(user_id, session_title)
+    session_id = chat_session['id'] if chat_session else None
+
+    if session_id:
+        supabase_service.save_chat_message(session_id, "model", f"🚀 Application session initialized for **{job_url}**. Starting agent...")
+
+
     if should_dispatch_github:
         action_payload = {
             "user_id": user_id,
             "job_url": job_url,
             "resume_filename": resume_filename,
-            "user_profile": profile_blob
+            "user_profile": profile_blob,
+            "session_id": session_id # Pass session ID
         }
         success = await dispatch_github_action("apply_agent.yml", "apply", action_payload)
         if success:
-             return {"message": "Application started (GitHub Action)"}
+             return {"message": "Application started (GitHub Action)", "session_id": session_id}
         else:
              logger.error("❌ Failed to dispatch GitHub Action for Apply. Falling back to local/background task if key available.")
 
@@ -230,6 +252,9 @@ async def trigger_apply(
 
     # If local fallback:
     async def _download_and_apply():
+        # session_id passed from outer scope
+        pass # placeholder to keep indentation logic clear, we just use session_id from above
+        
         # 1. Download Resume
         try:
             remote_path = f"{user_id}/{resume_filename}"
@@ -240,7 +265,7 @@ async def trigger_apply(
                 f.write(file_bytes)
 
             # 2. Run Applier
-            await run_applier_task(job_url, tmp_path, profile_blob, api_key, resume_filename=resume_filename, use_cloud=use_cloud_browser)
+            await run_applier_task(job_url, tmp_path, profile_blob, api_key, resume_filename=resume_filename, use_cloud=use_cloud_browser, session_id=session_id)
 
             # 3. Cleanup
             if os.path.exists(tmp_path):
@@ -250,6 +275,8 @@ async def trigger_apply(
             print(f"❌ Apply Wrapper Failed: {e}")
             # Try to revert status if possible?
             supabase_service.update_lead_status_by_url(user_id, job_url, "FAILED")
+            if session_id:
+                supabase_service.save_chat_message(session_id, "model", f"❌ Application Failed: {e}")
 
     background_tasks.add_task(_download_and_apply)
 

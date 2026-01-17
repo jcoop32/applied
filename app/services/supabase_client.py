@@ -486,6 +486,30 @@ class SupabaseService:
             print(f"❌ Update Chat Session Error: {e}")
             return None
 
+    def delete_chat_session(self, session_id: int):
+        """
+        Deletes a chat session and its messages (cascade usually handles messages if configured, 
+        otherwise we might need to delete messages first). 
+        Assuming Postgres ON DELETE CASCADE is set up.
+        If not, we delete messages first manually.
+        """
+        if not self.client: return False
+        try:
+            # Manual cascade just in case
+            self.client.table("chat_messages").delete().eq("session_id", session_id).execute()
+            
+            response = self.client.table("chat_sessions")\
+                .delete()\
+                .eq("id", session_id)\
+                .execute()
+            
+            # response.data usually contains deleted rows
+            return True
+        except Exception as e:
+            print(f"❌ Delete Chat Session Error: {e}")
+            return False
+
+
     def get_chat_sessions(self, user_id: int):
         """
         Fetches all chat sessions for a user, ordered by recent.

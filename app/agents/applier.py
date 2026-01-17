@@ -286,7 +286,7 @@ class ApplierAgent:
             print(f"⚠️ Browser Resolver failed: {e}")
             return url
 
-    async def apply(self, job_url: str, profile: Dict[str, Any], resume_path: str, dry_run: bool = False, lead_id: int = None, use_cloud: bool = False) -> str:
+    async def apply(self, job_url: str, profile: Dict[str, Any], resume_path: str, dry_run: bool = False, lead_id: int = None, use_cloud: bool = False, session_id: int = None) -> str:
         """
         Main entry point to apply for a job.
         Navigates, handles auth, fills forms, and optionally submits.
@@ -327,6 +327,12 @@ class ApplierAgent:
         saved_creds_str = self._get_matching_credentials(profile.get('email'))
 
         # 2. Construct the Agent Task
+        captcha_instruction = (
+            " - **CLOUD MODE DETECTED**: The Cloud Browser acts as a persistent human. **WAIT 15 SECONDS**. Do NOT stop. The cloud system often solves it automatically."
+            if use_cloud else
+            " - **IF IT FAILS OR REQUIRES SOLVING A PUZZLE**: \n               - **STOP IMMEDIATELY**. Do NOT try to guess. Do NOT ask user for help (they cannot see the screen).\n               - **RETURN FAILURE JSON**: `{{ \"status\": \"FAILED\", \"reason\": \"Visual CAPTCHA detected and blocked automation.\" }}`"
+        )
+
         task_prompt = f"""
         **OBJECTIVE**: Apply to the job at this URL: {resolved_url}
 
@@ -366,9 +372,7 @@ class ApplierAgent:
              - **WAIT** for the tool to return the code.
            - **Case B: Visual CAPTCHA (Images, Puzzle, Cloudflare)**:
              - Try to click the check box *once*.
-             - **IF IT FAILS OR REQUIRES SOLVING A PUZZLE**: 
-               - **STOP IMMEDIATELY**. Do NOT try to guess. Do NOT ask user for help (they cannot see the screen).
-               - **RETURN FAILURE JSON**: `{{ "status": "FAILED", "reason": "Visual CAPTCHA detected and blocked automation." }}`
+             {captcha_instruction}
 
         5. **Resume Upload (Top Priority)**:
            - Calls `update_status("Uploading Resume")`.
@@ -447,6 +451,11 @@ class ApplierAgent:
             print(f"🔄 STATUS UPDATE: {status}")
             if lead_id:
                 supabase_service.update_lead_status(lead_id, status)
+            
+            if session_id:
+                # Log status update to chat (debounced? or just log all major updates)
+                supabase_service.save_chat_message(session_id, "model", f"🔄 {status}")
+
             return "Status updated"
 
         try:

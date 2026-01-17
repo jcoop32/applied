@@ -160,13 +160,15 @@ async function loadSessions() {
             const item = document.createElement("div");
             item.className = "history-item session-item";
 
-            // Flex container for title and edit btn
+            // Flex container
             item.style.display = "flex";
             item.style.justifyContent = "space-between";
             item.style.alignItems = "center";
             item.style.padding = "10px 15px";
             item.style.cursor = "pointer";
+            item.style.position = "relative"; // For dropdown positioning
 
+            // Title
             const titleSpan = document.createElement("span");
             titleSpan.textContent = session.title;
             titleSpan.style.whiteSpace = "nowrap";
@@ -175,40 +177,124 @@ async function loadSessions() {
             titleSpan.style.marginRight = "10px";
             titleSpan.style.flex = "1";
 
+            // Allow clicking title to load
+            titleSpan.onclick = (e) => {
+                e.stopPropagation();
+                loadSession(session.id);
+            };
+
             item.appendChild(titleSpan);
 
-            // Edit Btn
-            const editBtn = document.createElement("i");
-            editBtn.className = "fas fa-pencil-alt";
-            editBtn.style.fontSize = "0.8rem";
-            editBtn.style.opacity = "0.5";
-            editBtn.style.cursor = "pointer";
-            editBtn.title = "Rename Chat";
+            // Kebab Menu (Three Dots)
+            const kebabBtn = document.createElement("div");
+            kebabBtn.className = "kebab-btn";
+            kebabBtn.innerHTML = '<i class="fas fa-ellipsis-v"></i>';
+            kebabBtn.style.padding = "5px";
+            kebabBtn.style.color = "var(--text-secondary)";
+            kebabBtn.style.cursor = "pointer";
 
-            editBtn.onmouseover = () => editBtn.style.opacity = "1";
-            editBtn.onmouseout = () => editBtn.style.opacity = "0.5";
+            // Dropdown Menu
+            const dropdown = document.createElement("div");
+            dropdown.className = "session-menu-dropdown";
+            dropdown.style.display = "none";
+            dropdown.style.position = "absolute";
+            dropdown.style.right = "10px";
+            dropdown.style.top = "30px";
+            dropdown.style.background = "#2a2a2a";
+            dropdown.style.border = "1px solid #444";
+            dropdown.style.borderRadius = "4px";
+            dropdown.style.zIndex = "100";
+            dropdown.style.minWidth = "120px";
 
-            editBtn.onclick = (e) => {
-                e.stopPropagation(); // Don't load session
+            // Rename Option
+            const renameOpt = document.createElement("div");
+            renameOpt.textContent = "Rename";
+            renameOpt.style.padding = "8px 12px";
+            renameOpt.style.cursor = "pointer";
+            renameOpt.className = "menu-option";
+            renameOpt.onmouseover = () => renameOpt.style.background = "#3a3a3a";
+            renameOpt.onmouseout = () => renameOpt.style.background = "transparent";
+            renameOpt.onclick = (e) => {
+                e.stopPropagation();
+                dropdown.style.display = "none";
                 renameSession(session.id, session.title);
             };
 
-            item.appendChild(editBtn);
+            // Delete Option
+            const deleteOpt = document.createElement("div");
+            deleteOpt.textContent = "Delete";
+            deleteOpt.style.padding = "8px 12px";
+            deleteOpt.style.cursor = "pointer";
+            deleteOpt.style.color = "#ff6b6b";
+            deleteOpt.className = "menu-option";
+            deleteOpt.onmouseover = () => deleteOpt.style.background = "#3a3a3a";
+            deleteOpt.onmouseout = () => deleteOpt.style.background = "transparent";
+            deleteOpt.onclick = (e) => {
+                e.stopPropagation();
+                dropdown.style.display = "none";
+                deleteSession(session.id);
+            };
+
+            dropdown.appendChild(renameOpt);
+            dropdown.appendChild(deleteOpt);
+
+            kebabBtn.onclick = (e) => {
+                e.stopPropagation();
+                // Close others
+                document.querySelectorAll('.session-menu-dropdown').forEach(el => {
+                    if (el !== dropdown) el.style.display = 'none';
+                });
+                dropdown.style.display = dropdown.style.display === "block" ? "none" : "block";
+            };
+
+            item.appendChild(kebabBtn);
+            item.appendChild(dropdown);
 
             // Highlight current
             if (session.id === currentSessionId) {
-                item.style.background = "rgba(255,255,255,0.1)";
-                item.style.color = "white";
+                item.classList.add('active');
             }
+
+            // Click item (background) loads session
             item.onclick = (e) => {
-                // Only trigger if not clicking edit (already handled by stopPropagation but safest)
-                if (e.target !== editBtn) loadSession(session.id);
+                loadSession(session.id);
             };
+
             container.appendChild(item);
+        });
+
+        // Global click to close menus
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.kebab-btn')) {
+                document.querySelectorAll('.session-menu-dropdown').forEach(el => el.style.display = 'none');
+            }
         });
 
     } catch (e) {
         console.error("Failed to load sessions", e);
+    }
+}
+
+async function deleteSession(sessionId) {
+    if (!confirm("Are you sure you want to delete this chat?")) return;
+
+    try {
+        const res = await authFetch(`${API_BASE}/chat/sessions/${sessionId}`, {
+            method: "DELETE"
+        });
+
+        if (res.ok) {
+            // If current session, clear it
+            if (currentSessionId === sessionId) {
+                startNewChat();
+            } else {
+                loadSessions();
+            }
+        } else {
+            alert("Failed to delete session");
+        }
+    } catch (e) {
+        console.error("Delete failed", e);
     }
 }
 
@@ -275,9 +361,13 @@ async function loadSession(sessionId) {
         if (!res.ok) throw new Error("Failed to load");
         const messages = await res.json();
 
-        messages.forEach(msg => {
-            addMessage(msg.role === 'model' ? 'model' : 'user', msg.content, true);
-        });
+        if (messages.length === 0) {
+            addMessage("model", "This session history is empty.", true);
+        } else {
+            messages.forEach(msg => {
+                addMessage(msg.role === 'model' ? 'model' : 'user', msg.content, true);
+            });
+        }
 
         setTimeout(scrollToBottom, 100);
     } catch (e) {
@@ -437,9 +527,8 @@ async function checkResearcherVisibility() {
     }
 }
 
-async function triggerResearch(type = 'getwork') {
-    let typeName = type === 'google' ? 'Google' : 'GetWork';
-    addMessage("user", `Start ${typeName} Researcher`);
+async function triggerResearch() {
+    addMessage("user", `Start Researcher`);
     try {
         const profileRes = await authFetch(`${API_BASE}/profile`);
         const profileData = await profileRes.json();
@@ -450,15 +539,14 @@ async function triggerResearch(type = 'getwork') {
             return;
         }
 
-        addMessage("model", `Starting ${typeName} research with **${resumeName}**...`);
+        addMessage("model", `Starting research with **${resumeName}**...`);
 
         const res = await authFetch(`${API_BASE}/agents/research`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 resume_filename: resumeName,
-                limit: 10,
-                researcher_type: type
+                limit: 10
             })
         });
 
@@ -478,10 +566,14 @@ async function initProfilePage() {
     const resumeSelect = document.getElementById("primary-resume-select");
     const autoFillBtn = document.getElementById("parse-btn");
 
+    // Store current profile for merging later
+    let currentProfile = {};
+
     // Load current profile
     try {
         const res = await authFetch(`${API_BASE}/profile`);
         const user = await res.json();
+        currentProfile = user.profile_data || {};
 
         // Fill form fields
         if (user.profile_data) {
@@ -505,13 +597,13 @@ async function initProfilePage() {
             const expContainer = document.getElementById("experience-list");
             if (expContainer && p.experience && p.experience.length > 0) {
                 expContainer.innerHTML = p.experience.map(e => `
-                    <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; margin-bottom: 10px; border: 1px solid var(--border-color);">
-                        <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
-                            <strong style="color: var(--text-primary); font-size: 1rem;">${e.title || 'Role'}</strong>
-                            <span style="color: var(--accent-color); font-size: 0.9rem;">${e.duration || ''}</span>
+                    <div class="experience-card">
+                        <div class="card-header">
+                            <strong class="card-title">${e.title || 'Role'}</strong>
+                            <span class="card-meta">${e.duration || ''}</span>
                         </div>
-                        <div style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 5px;">${e.company || 'Company'}</div>
-                        <p style="color: var(--text-secondary); font-size: 0.85rem; line-height: 1.4; margin: 0;">${e.responsibilities || ''}</p>
+                        <div class="card-subtitle">${e.company || 'Company'}</div>
+                        <p class="card-body">${e.responsibilities || ''}</p>
                     </div>
                 `).join("");
             }
@@ -520,12 +612,12 @@ async function initProfilePage() {
             const eduContainer = document.getElementById("education-list");
             if (eduContainer && p.education && p.education.length > 0) {
                 eduContainer.innerHTML = p.education.map(e => `
-                    <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; margin-bottom: 10px; border: 1px solid var(--border-color);">
-                        <div style="display:flex; justify-content:space-between;">
-                            <strong style="color: var(--text-primary);">${e.school || 'School'}</strong>
-                            <span style="color: var(--text-secondary);">${e.date || ''}</span>
+                    <div class="experience-card">
+                        <div class="card-header">
+                            <strong class="card-title">${e.school || 'School'}</strong>
+                            <span class="card-subtitle">${e.date || ''}</span>
                         </div>
-                        <div style="color: var(--text-secondary); font-size: 0.9rem;">${e.degree || 'Degree'}</div>
+                        <div class="card-body">${e.degree || 'Degree'}</div>
                     </div>
                 `).join("");
             }
@@ -595,10 +687,11 @@ async function initProfilePage() {
             const saveBtn = document.getElementById("save-btn");
             const statusMsg = document.getElementById("status-msg");
 
-            // Collect form data
+            // Collect form data and merge with existing profile data
             const formData = {
                 full_name: document.getElementById("full_name")?.value || "",
                 profile_data: {
+                    ...currentProfile, // MERGE existing data (experience, education, etc.)
                     name: document.getElementById("full_name")?.value || "",
                     phone: document.getElementById("phone")?.value || "",
                     linkedin: document.getElementById("linkedin")?.value || "",
@@ -1130,15 +1223,29 @@ function confirmApplyToChat() {
     const selectedResume = resumeSelect?.value || '';
     const instructions = instructionsEl?.value?.trim() || '';
 
+    // Get Execution Mode
+    const modeInputs = document.getElementsByName('execution-mode');
+    let selectedMode = 'cloud'; // Default
+    if (modeInputs) {
+        for (const input of modeInputs) {
+            if (input.checked) {
+                selectedMode = input.value;
+                break;
+            }
+        }
+    }
+
     if (!selectedResume) {
         alert('Please select a resume');
         return;
     }
 
     // Build the structured prompt
+    // We append the mode in a specific format for the backend to parse
     let prompt = `Apply to @${job.title} at ${job.company} using resume [${selectedResume}].
 
-Job URL: ${job.url}`;
+Job URL: ${job.url}
+(Mode: ${selectedMode === 'local' ? 'Local' : 'Cloud'})`;
 
     if (instructions) {
         prompt += `

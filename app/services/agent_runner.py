@@ -4,7 +4,7 @@ import json
 import logging
 import asyncio
 from app.services.supabase_client import supabase_service
-from app.agents.researcher import ResearcherAgent
+
 from app.agents.google_researcher import GoogleResearcherAgent
 from app.agents.matcher import MatcherAgent
 from app.agents.applier import ApplierAgent
@@ -36,8 +36,11 @@ def update_research_status(user_id: int, resume_filename: str, status: str):
         logger.error(f"Failed to update research status: {e}")
 
 
-async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str, limit: int = 20, job_title: str = None, location: str = None, researcher_type: str = "getwork"):
-    print(f"🕵️ Worker: Starting Research for {resume_filename} with limit {limit} (Type: {researcher_type})...")
+async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str, limit: int = 20, job_title: str = None, location: str = None, session_id: int = None):
+    print(f"🕵️ Worker: Starting Research for {resume_filename} with limit {limit} (Type: Google)...")
+    if session_id:
+        supabase_service.save_chat_message(session_id, "model", f"🕵️ Starting Research for **{resume_filename}**...")
+    
     update_research_status(user_id, resume_filename, "SEARCHING")
 
     try:
@@ -97,18 +100,14 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
         print(f"📄 Parsed Profile for {resume_filename}: {profile_blob.get('full_name', 'Unknown')}")
 
         # 3. Research
-        if researcher_type == "google":
-             print("🔎 Using Google Verification Agent...")
-             researcher = GoogleResearcherAgent(api_key=api_key)
-        else:
-             print("🔎 Using Standard GetWork Agent...")
-             researcher = ResearcherAgent(api_key=api_key)
+        print("🔎 Using Google Verification Agent...")
+        researcher = GoogleResearcherAgent(api_key=api_key)
              
         # We use the DYNAMIC profile_blob here
         leads = await researcher.gather_leads(profile_blob, limit=limit, job_title=job_title, location=location)
 
         # Prefix query_source for UI identification
-        prefix = "GOOGLE" if researcher_type == "google" else "GETWORK"
+        prefix = "GOOGLE"
         for lead in leads:
             lead['query_source'] = f"{prefix}|{lead.get('query_source', 'Unknown')}"
 
@@ -135,9 +134,15 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
 
         print(f"✅ Worker: Research Completed. Saved {len(scored_matches)} matches.")
         update_research_status(user_id, resume_filename, "COMPLETED")
+        
+        if session_id:
+            supabase_service.save_chat_message(session_id, "model", f"✅ Research Complete! Found **{len(scored_matches)}** matches.\n\nCheck the **Jobs** tab or reload your dashboard.")
 
     except Exception as e:
         print(f"❌ Worker: Research Failed: {e}")
+        if session_id:
+            supabase_service.save_chat_message(session_id, "model", f"❌ Research Failed: {e}")
+            
         # Ensure we update status to FAILED so UI unblocks
         try:
             update_research_status(user_id, resume_filename, "FAILED")
@@ -145,8 +150,10 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
              print(f"❌ Failed to final update status: {status_err}")
 
 
-async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, api_key: str, resume_filename: str = None, use_cloud: bool = False):
+async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, api_key: str, resume_filename: str = None, use_cloud: bool = False, session_id: int = None):
     print(f"🚀 Worker: Applying to {job_url} ...")
+    if session_id:
+        supabase_service.save_chat_message(session_id, "model", f"🚀 Starting Application to **{job_url}**...")
     
     # Resolve Lead ID for status updates
     user_id = user_profile.get("user_id") or user_profile.get("id")
@@ -171,9 +178,12 @@ async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, a
         is_headless = os.getenv("HEADLESS", "false").lower() == "true" or os.getenv("GITHUB_ACTIONS") == "true"
         applier = ApplierAgent(api_key=api_key, headless=is_headless)
         # Pass lead_id to apply method
-        result_status = await applier.apply(job_url, user_profile, resume_path, lead_id=lead_id, use_cloud=use_cloud)
+        result_status = await applier.apply(job_url, user_profile, resume_path, lead_id=lead_id, use_cloud=use_cloud, session_id=session_id)
         
         print(f"🏁 Worker: Applier finished: {result_status}")
+        
+        if session_id:
+            supabase_service.save_chat_message(session_id, "model", f"🏁 Application Finished. Status: **{result_status}**")
         
         if lead_id:
              # Default to FAILED safest

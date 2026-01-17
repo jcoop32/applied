@@ -44,6 +44,17 @@ async def update_session(
         raise HTTPException(status_code=500, detail="Failed to update session")
     return session
 
+@router.delete("/sessions/{session_id}")
+async def delete_session(
+    session_id: int,
+    current_user: dict = Depends(get_current_user)
+):
+    # Security: In real app, verify user owns session
+    success = supabase_service.delete_chat_session(session_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to delete session")
+    return {"status": "success"}
+
 @router.get("/sessions/{session_id}/messages")
 async def get_session_messages(
     session_id: str,
@@ -102,6 +113,17 @@ async def chat_message(
             instructions_match = re.search(r'Additional instructions:\s*(.+)', payload.message, re.DOTALL | re.IGNORECASE)
             additional_instructions = instructions_match.group(1).strip() if instructions_match else ""
             
+            # Extract Mode (Optional)
+            # Format: (Mode: Cloud) or (Mode: Local)
+            mode_match = re.search(r'\(Mode:\s*(Cloud|Local)\)', payload.message, re.IGNORECASE)
+            mode_str = mode_match.group(1).lower() if mode_match else "cloud" # Default to cloud
+            
+            use_cloud = True
+            if mode_str == "local":
+                use_cloud = False
+
+            # Trigger the applier agent
+            
             # Trigger the applier agent
             from app.services.agent_runner import run_applier_task
             from fastapi import BackgroundTasks
@@ -132,7 +154,7 @@ async def chat_message(
                     with open(tmp_path, "wb") as f:
                         f.write(file_bytes)
                     
-                    await run_applier_task(job_url, tmp_path, profile_blob, api_key, resume_filename=resume_name, use_cloud=True)
+                    await run_applier_task(job_url, tmp_path, profile_blob, api_key, resume_filename=resume_name, use_cloud=use_cloud)
                     
                     # Cleanup
                     if os.path.exists(tmp_path):

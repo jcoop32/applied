@@ -108,12 +108,10 @@ class ResumeParser:
             return {"month": "", "year": ""}
 
         transformed = {
-            "contact_info": {
-                "phone": parsed_data.get("phone", ""),
-                "linkedin": parsed_data.get("linkedin", ""),
-                "portfolio": parsed_data.get("website", ""),
-                "address": parsed_data.get("location", "")
-            },
+            "phone": parsed_data.get("phone", ""),
+            "linkedin": parsed_data.get("linkedin", ""),
+            "portfolio": parsed_data.get("website", ""),
+            "address": parsed_data.get("location", ""),
             "summary": parsed_data.get("summary", ""),
             "skills": parsed_data.get("skills", []),
             "experience": [],
