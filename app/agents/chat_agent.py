@@ -39,18 +39,31 @@ class ChatAgent:
         Tone: Professional, Encouraging, Concise.
         
         Instructions:
-        Instructions:
-        - If the user asks to "Find jobs":
-            - Check the available resumes in your context.
-            - If there are multiple resumes and the user hasn't specified one, you **MUST** use the `ask_clarification` tool to ask which one. **DO NOT** just list them in a text response.
-            - If there is only one resume, just use `search_jobs` with that resume automatically.
-        - If the user asks to "Apply", use the `apply_to_job` tool.
-        - Keep answers short (under 3 paragraphs).
-        - Format output with Markdown.
+        You are the "Resume Expert" AI. You help users find and apply to jobs.
+        
+        **CRITICAL: TOOL USAGE RULES**
+        1. **Find Jobs / Search**:
+           - IF the user wants to search/find jobs:
+             - Check `Available Resumes` list.
+             - IF multiple resumes exist and user didn't pick one -> **CALL `ask_clarification`** with the resume names as `options`.
+             - IF only one resume exists -> **CALL `search_jobs`** with that resume.
+        
+        2. **Apply**:
+           - IF user wants to apply to a specific job (e.g. "Apply to @Software Engineer"):
+             - IF you have the URL -> **CALL `apply_to_job`** with `job_url`.
+             - IF you DO NOT have the URL -> **CALL `apply_to_job`** with `job_title` (extracted from user Request). Do NOT ask for URL. The system will look it up.
+        
+        3. **General Chat**:
+           - If no action is needed, just reply helpful text.
+           - If you are unsure, ASK the user.
+
+        **Example Flow**:
+        User: "Apply to @Python Dev"
+        Assistant: (Calls tool) apply_to_job(job_title="Python Dev", resume_filename="...", mode="cloud")
         """
 
         # 3. Define Tools
-        def search_jobs(resume_filename: str, limit: int = 20, job_title_override: str = None, location_override: str = None):
+        def search_jobs(resume_filename: str, limit: int = 20, job_title_override: str = "", location_override: str = ""):
             """
             Starts the Researcher Agent to find job leads on ATS sites.
             args:
@@ -61,11 +74,12 @@ class ChatAgent:
             """
             return "started_research"
 
-        def apply_to_job(job_url: str, resume_filename: str, mode: str = "cloud", extra_instructions: str = None):
+        def apply_to_job(job_url: str = "", job_title: str = "", resume_filename: str = "", mode: str = "cloud", extra_instructions: str = ""):
             """
             Starts the Applier Agent to apply for a job.
             args:
-                job_url: The URL of the job post.
+                job_url: The URL of the job post (Optional if title provided).
+                job_title: The Title of the job to lookup in DB (Optional if URL provided).
                 resume_filename: The exact filename of the resume to use.
                 mode: 'cloud' or 'local' (default 'cloud').
                 extra_instructions: Any custom instructions for the agent (e.g. 'salary expectation 100k').
@@ -100,15 +114,20 @@ class ChatAgent:
 
         try:
             # Generate with Tools
+            # IMPORTANT: Disable automatic function calling so we can intercept the call
+            # and return it as an action to the API layer.
             response = self.client.models.generate_content(
                 model=self.model_id,
                 contents=contents,
                 config=genai.types.GenerateContentConfig(
                     system_instruction=system_instruction,
                     tools=tools,
-                    temperature=0.7
+                    temperature=0.7,
+                    automatic_function_calling={"disable": True}
                 )
             )
+
+            print(f"🤖 RAW GEMINI RESPONSE: {response}") # DEBUG LOG
 
             # Check for Function Calls
             action = None

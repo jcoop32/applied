@@ -1292,33 +1292,48 @@ sendMessage = async function () {
     // Regex to detect "Apply to @..." command
     // Accepts: Apply to @JobTitle ...
     if (text.toLowerCase().startsWith("apply to @")) {
-        // Try to identify the job
-        // 1. Check window.lastMentionedJob (most reliable if user clicked dropdown)
-        let job = window.lastMentionedJob;
+        try {
+            // Try to identify the job
+            // 1. Check window.lastMentionedJob (most reliable if user clicked dropdown)
+            let job = window.lastMentionedJob;
 
-        // 2. If not set, try to fuzzy match from text
-        if (!job) {
-            // Extract title: "Apply to @Software Engineer at Google"
-            // Remove "Apply to @"
-            let raw = text.substring(9);
-            // This is loose, but let's try to match against availableLeads
-            job = availableLeads.find(l => raw.toLowerCase().includes(l.title.toLowerCase()));
-        }
+            // 2. If not set, try to fuzzy match from text
+            if (!job && Array.isArray(availableLeads)) {
+                // Extract title: "Apply to @Software Engineer at Google"
+                // Remove "Apply to @"
+                let raw = text.substring(9);
+                // This is loose, but let's try to match against availableLeads
+                job = availableLeads.find(l => raw.toLowerCase().includes(l.title.toLowerCase()));
+            }
 
-        if (job) {
-            // Open Modal instead of sending
-            // Clear input? Maybe keep it until confirmed?
-            // Let's clear it to show we "consumed" the command
-            chatInput.value = "";
-            chatInput.style.height = "auto";
+            if (job) {
+                // Open Modal instead of sending
+                // Clear input first to show we consumed it
+                chatInput.value = "";
+                chatInput.style.height = "auto";
 
-            // Open Unified Modal
-            // We need to pass the resume context too.
-            const profileRes = await authFetch(`${API_BASE}/profile`);
-            const profile = await profileRes.json();
+                // Open Unified Modal
+                // We need to pass the resume context too.
+                // We fetch profile to get the preferred resume, but don't block hard on it
+                let resumeName = null;
+                try {
+                    const profileRes = await authFetch(`${API_BASE}/profile`);
+                    if (profileRes.ok) {
+                        const profile = await profileRes.json();
+                        resumeName = profile.primary_resume_name;
+                    }
+                } catch (pe) {
+                    console.warn("Could not fetch profile for resume context", pe);
+                }
 
-            openApplyModal(job, profile.primary_resume_name);
-            return;
+                await openApplyModal(job, resumeName);
+                return;
+            }
+        } catch (e) {
+            console.error("Error in Apply Interception:", e);
+            alert("Unexpected error opening apply modal. Check console.");
+            // Fallback: Restore text so they can try again or send as normal message
+            chatInput.value = text;
         }
     }
 

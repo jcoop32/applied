@@ -96,7 +96,11 @@ class SupabaseService:
             result = []
             for f in files:
                 if f['name'] == '.emptyFolderPlaceholder': continue # Skip system files
-
+                
+                # Filter for actual resume documents
+                lower_name = f['name'].lower()
+                if not (lower_name.endswith('.pdf') or lower_name.endswith('.docx') or lower_name.endswith('.doc')):
+                    continue
                 result.append({
                     "name": f['name'],
                     "id": f['id'],
@@ -334,6 +338,59 @@ class SupabaseService:
 
         except Exception as e:
              print(f"❌ Supabase Leads Save Error: {e}")
+
+    def get_lead_by_title(self, user_id: int, input_text: str):
+        """
+        Fetches a lead by Title, handling "Title at Company" formats.
+        """
+        if not self.client: return None
+
+        # Helper to execute query
+        def _search(title_query, company_query=None):
+            q = self.client.table("leads").select("*").eq("user_id", user_id)
+            q = q.ilike("title", f"%{title_query}%")
+            if company_query:
+                q = q.ilike("company", f"%{company_query}%")
+            return q.order("created_at", desc=True).limit(1).execute()
+
+        try:
+            # 1. Try separating " at " (e.g. "Software Engineer at Google")
+            import re
+            # Split on " at " case-insensitive
+            parts = re.split(r'\s+at\s+', input_text, flags=re.IGNORECASE)
+            
+            # Scenario A: We found a split (Title + Company)
+            if len(parts) >= 2:
+                # Assume last part is company, join rest as title
+                candidate_company = parts[-1].strip()
+                candidate_title = " at ".join(parts[:-1]).strip()
+                
+                print(f"🕵️‍♀️ Strict Search -> Title: '{candidate_title}' | Company: '{candidate_company}'")
+
+                # Attempt 1: Match Title AND Company
+                res = _search(candidate_title, candidate_company)
+                if res.data: 
+                    print(f"✅ Strict Match Found: {res.data[0]['title']} @ {res.data[0]['company']}")
+                    return res.data[0]
+                else:
+                    print("❌ Strict Match Failed.")
+
+                # DANGEROUS FALLBACK REMOVED: Do NOT search just by title if user specified company.
+                # It causes false positives (e.g. finding 'Dev at Google' when asking for 'Dev at Facebook')
+
+            # Scenario B: Search full string in Title column
+            # Useful if "at" wasn't a separator, or if the user typed the Company in the Title field manually?
+            print(f"🕵️‍♀️ Fallback Search (Full String) -> Title: '{input_text}'")
+            res = _search(input_text)
+            if res.data: 
+                print(f"✅ Fallback Match Found: {res.data[0]['title']}")
+                return res.data[0]
+
+            return None
+
+        except Exception as e:
+            print(f"❌ Supabase Lead Fetch by Title Error: {e}")
+            return None
 
     def get_lead_by_url(self, user_id: int, url: str):
         """

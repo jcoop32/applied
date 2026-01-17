@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, BackgroundTasks
 from app.api.auth import get_current_user
 from app.agents.chat_agent import ChatAgent
 from app.services.supabase_client import supabase_service
@@ -70,6 +70,7 @@ async def get_session_messages(
 @router.post("/message")
 async def chat_message(
     payload: MessageRequest,
+    background_tasks: BackgroundTasks,
     current_user: dict = Depends(get_current_user)
 ):
     api_key = os.getenv("GEMINI_API_KEY")
@@ -95,6 +96,7 @@ async def chat_message(
     # 3. Fetch Available Resumes for Context
     resumes_list = supabase_service.list_resumes(user_id)
     available_resumes = [r['name'] for r in resumes_list]
+    print(f"📄 Available Resumes (Debug): {available_resumes}") # DEBUG LOG
 
     # 4. Fetch History (from DB)
     db_history = supabase_service.get_chat_history(session_id)
@@ -114,6 +116,8 @@ async def chat_message(
     response_text = agent_response["content"]
     action = agent_response["action"]
     
+    print(f"🤖 Agent Response Action: {action}") # DEBUG LOG
+
     # 5. Handle Actions (if any)
     if action:
         if action["type"] == "research":
@@ -143,14 +147,57 @@ async def chat_message(
                 limit=limit,
                 job_title=job_title,
                 location=location,
-                search_provider="google", # Default
                 session_id=session_id
             )
 
         elif action["type"] == "apply":
             args = action["payload"]
             job_url = args.get("job_url")
+            job_title = args.get("job_title")
             resume_filename = args.get("resume_filename")
+            
+            # 1. Fallback: Lookup by Title if URL missing
+            if not job_url and job_title:
+                print(f"🔎 Looking up job URL for title: {job_title}")
+                lead = supabase_service.get_lead_by_title(user_id, job_title)
+                if lead:
+                    job_url = lead['url']
+                    response_text += f"\n\n✅ Found job match: **{lead['title']}** at **{lead['company']}**"
+                else:
+                     response_text += f"\n\n❌ Could not find a saved job matching '**{job_title}**'. Please provide the URL or search for it first."
+                     return {
+                        "role": "model", 
+                        "content": response_text, 
+                        "session_id": session_id 
+                    }
+            
+            if not job_url:
+                 # Should not happen if agent follows rules, but just in case
+                 return {
+                        "role": "model", 
+                        "content": "I couldn't identify which job to apply to. Please specify a URL or exact Title.", 
+                        "session_id": session_id 
+                    }
+
+            # 2. Resume Fallback
+            if not resume_filename:
+                print("⚠️ No resume specified in action. Checking profile default...")
+                # We need to fetch the raw user row to get profile_data
+                user_row = supabase_service.get_user_by_email(current_user['email'])
+                profile_data = user_row.get('profile_data', {})
+                resume_filename = profile_data.get('primary_resume_name')
+                
+                if resume_filename:
+                    print(f"✅ Using default resume: {resume_filename}")
+                    response_text += f"\n\n(Using default resume: **{resume_filename}**)"
+                else:
+                    return {
+                        "role": "model",
+                        "content": "I found the job but I don't know which resume to use. Please specify a resume or set a primary one in your Profile.",
+                        "session_id": session_id
+                    }
+
+            extra_instructions = args.get("extra_instructions")
             extra_instructions = args.get("extra_instructions")
             mode = args.get("mode", "cloud")
             
@@ -201,6 +248,10 @@ async def chat_message(
                 "session_id": session_id,
                 "buttons": action["payload"].get("options", [])
             }
+
+    # If Agent returned nothing (no text, no action), provide fallback
+    if not response_text and not action:
+        response_text = "I'm not sure how to handle that. Could you try rephrasing or asking for 'Jobs' or 'Apply'?"
 
     # 6. Save Bot Response
     supabase_service.save_chat_message(session_id, "model", response_text)
