@@ -156,6 +156,11 @@ async def parse_resume(
 
     except Exception as e:
         print(f"Parse Error: {e}")
+        # Log to file for debugging
+        with open("error_log.txt", "a") as log_file:
+            import traceback
+            log_file.write(f"\n[{datetime.now()}] Parse Error: {str(e)}\n")
+            log_file.write(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
 

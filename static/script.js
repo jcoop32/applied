@@ -85,14 +85,6 @@ function initChatPage() {
     const uploadTrigger = document.getElementById("upload-trigger");
     const newChatBtn = document.getElementById("new-chat-btn");
 
-    // Sidebar Chat History List
-    const sessionListContainer = document.createElement("div");
-    sessionListContainer.id = "session-list";
-    sessionListContainer.className = "session-list";
-    // Insert after "New Chat" button in sidebar
-    const sidebarGroup = document.querySelector(".sidebar .menu-group");
-    if (sidebarGroup) sidebarGroup.appendChild(sessionListContainer);
-
     // Load Sessions, then restore last active session
     loadSessions().then(() => {
         const savedSessionId = localStorage.getItem('currentChatSessionId');
@@ -157,30 +149,23 @@ async function loadSessions() {
         if (!res.ok) return;
         const sessions = await res.json();
 
-        const container = document.getElementById("session-list");
+        const container = document.getElementById("chat-history-list");
         if (!container) return;
-        container.innerHTML = ""; // clear
 
-        if (sessions.length > 0) {
-            const header = document.createElement("div");
-            header.textContent = "Chat History";
-            header.style.padding = "10px 15px";
-            header.style.fontSize = "0.75rem";
-            header.style.fontWeight = "600";
-            header.style.color = "var(--text-secondary)";
-            header.style.textTransform = "uppercase";
-            header.style.letterSpacing = "0.05em";
-            container.appendChild(header);
-        }
+        // Remove only dynamically added session items, keep the static "Current Session"
+        container.querySelectorAll(".session-item").forEach(item => item.remove());
 
+        // Add session items
         sessions.forEach(session => {
             const item = document.createElement("div");
-            item.className = "menu-item session-item";
+            item.className = "history-item session-item";
 
             // Flex container for title and edit btn
             item.style.display = "flex";
             item.style.justifyContent = "space-between";
             item.style.alignItems = "center";
+            item.style.padding = "10px 15px";
+            item.style.cursor = "pointer";
 
             const titleSpan = document.createElement("span");
             titleSpan.textContent = session.title;
@@ -188,6 +173,7 @@ async function loadSessions() {
             titleSpan.style.overflow = "hidden";
             titleSpan.style.textOverflow = "ellipsis";
             titleSpan.style.marginRight = "10px";
+            titleSpan.style.flex = "1";
 
             item.appendChild(titleSpan);
 
@@ -427,11 +413,10 @@ async function handleFileUpload(e) {
 }
 
 async function checkResearcherVisibility() {
-    const btn = document.querySelector(".chip[onclick*='triggerResearch']");
-    if (!btn) return;
+    const btns = document.querySelectorAll(".research-btn");
+    if (!btns || btns.length === 0) return;
 
-    // Default hidden
-    // btn.style.display = "none";
+    // Default hidden handled by logic below
 
     try {
         // Fetch profile to check resume
@@ -440,18 +425,21 @@ async function checkResearcherVisibility() {
         const hasResume = !!data.primary_resume_name;
 
         // Just hide/show
-        if (hasResume) {
-            btn.style.display = "inline-flex";
-        } else {
-            btn.style.display = "none";
-        }
+        btns.forEach(btn => {
+            if (hasResume) {
+                btn.style.display = "inline-flex";
+            } else {
+                btn.style.display = "none";
+            }
+        });
     } catch (e) {
-        btn.style.display = "none";
+        btns.forEach(btn => btn.style.display = "none");
     }
 }
 
-async function triggerResearch() {
-    addMessage("user", "Start Research Agent");
+async function triggerResearch(type = 'getwork') {
+    let typeName = type === 'google' ? 'Google' : 'GetWork';
+    addMessage("user", `Start ${typeName} Researcher`);
     try {
         const profileRes = await authFetch(`${API_BASE}/profile`);
         const profileData = await profileRes.json();
@@ -462,12 +450,16 @@ async function triggerResearch() {
             return;
         }
 
-        addMessage("model", `Starting research with **${resumeName}**...`);
+        addMessage("model", `Starting ${typeName} research with **${resumeName}**...`);
 
         const res = await authFetch(`${API_BASE}/agents/research`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ resume_filename: resumeName, limit: 10 })
+            body: JSON.stringify({
+                resume_filename: resumeName,
+                limit: 10,
+                researcher_type: type
+            })
         });
 
         if (res.ok) {
@@ -651,18 +643,77 @@ async function initProfilePage() {
     }
 }
 
-async function triggerApply(url, title) {
-    if (!confirm(`Apply to ${title}?`)) return;
-    addMessage("user", `Apply to ${title}`);
-    addMessage("model", "Starting Application...");
+async function triggerApply(url, title, mode = null) {
+    // If no mode specified, prompt user for choice
+    if (!mode) {
+        const choice = await showApplyModeModal(url, title);
+        if (!choice) return; // User cancelled
+        mode = choice;
+    }
 
-    const res = await authFetch(`${API_BASE}/agents/apply`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ job_url: url, mode: "cloud" })
+    addMessage("user", `Apply to ${title} (${mode === 'cloud' ? '☁️ Cloud' : '💻 Local'})`);
+    addMessage("model", `Starting Application using ${mode === 'cloud' ? 'Browser Use Cloud' : 'Local Browser'}...`);
+
+    try {
+        const res = await authFetch(`${API_BASE}/agents/apply`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ job_url: url, mode: mode })
+        });
+
+        if (res.ok) {
+            const data = await res.json();
+            let msg = "✅ Application started.";
+            if (data.session_url) {
+                msg += `\n\n🔗 **Watch Live**: [View Session](${data.session_url})`;
+            }
+            addMessage("model", msg);
+        } else {
+            addMessage("model", "❌ Failed to start application.");
+        }
+    } catch (e) {
+        console.error(e);
+        addMessage("model", "❌ Error starting application.");
+    }
+}
+
+// Mode selection modal for Applier Agent
+function showApplyModeModal(url, title) {
+    return new Promise((resolve) => {
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.style.display = 'block';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width: 420px;">
+                <div class="modal-header">
+                    <h3>Choose Execution Mode</h3>
+                    <span class="close-modal">&times;</span>
+                </div>
+                <div class="modal-body" style="text-align: center; padding: 20px;">
+                    <p style="margin-bottom: 20px;">How would you like to run the Applier Agent for <strong>${title}</strong>?</p>
+                    <div style="display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
+                        <button id="mode-local-btn" class="chip" style="padding: 15px 25px; font-size: 1rem;">
+                            💻 Run Locally
+                        </button>
+                        <button id="mode-cloud-btn" class="chip" style="padding: 15px 25px; font-size: 1rem; background: linear-gradient(135deg, #667eea, #764ba2);">
+                            ☁️ Run in Cloud
+                        </button>
+                    </div>
+                    <p style="margin-top: 15px; font-size: 0.85rem; color: var(--text-secondary);">
+                        Cloud mode bypasses CAPTCHAs and provides enhanced stealth.
+                    </p>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        const close = () => { modal.remove(); resolve(null); };
+        modal.querySelector('.close-modal').onclick = close;
+        modal.onclick = (e) => { if (e.target === modal) close(); };
+
+        modal.querySelector('#mode-local-btn').onclick = () => { modal.remove(); resolve('local'); };
+        modal.querySelector('#mode-cloud-btn').onclick = () => { modal.remove(); resolve('cloud'); };
     });
-    if (res.ok) addMessage("model", "✅ Started.");
-    else addMessage("model", "❌ Failed.");
 }
 
 function addJobCards(jobs) {

@@ -197,6 +197,10 @@ async def trigger_apply(
         # Local/Server-side execution BUT with Cloud Browser
         should_dispatch_github = False 
         use_cloud_browser = True
+    elif mode == 'local':
+        # Explicit local mode - no GitHub Actions, no cloud browser
+        should_dispatch_github = False
+        use_cloud_browser = False
     else:
         # Fallback to legacy ENV variable logic
         if USE_GITHUB_ACTIONS:

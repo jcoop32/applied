@@ -75,8 +75,12 @@
             <div class="input-area-wrapper">
                 <!-- Action Chips -->
                 <div class="action-chips">
-                    <button class="chip" onclick="triggerResearch()">
-                        <i class="fas fa-search"></i> Researcher
+                    <button class="chip research-btn" onclick="triggerResearch('google')"
+                        style="background: linear-gradient(135deg, #4285f4, #34a853); border: none;">
+                        <i class="fab fa-google"></i> Google Researcher (Rec)
+                    </button>
+                    <button class="chip research-btn" onclick="triggerResearch('getwork')">
+                        <i class="fas fa-search"></i> GetWork Researcher
                     </button>
                     <button class="chip" id="attach-resume-btn">
                         <i class="fas fa-paperclip"></i> Attach Resume
