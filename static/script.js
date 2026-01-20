@@ -1071,6 +1071,13 @@ async function initJobsPage() {
         loadJobs(e.target.value);
     });
 
+    const sortSelect = document.getElementById("sort-jobs");
+    if (sortSelect) {
+        sortSelect.addEventListener("change", () => {
+            loadJobs(resumeSelect.value);
+        });
+    }
+
     refreshBtn.addEventListener("click", () => {
         loadJobs(resumeSelect.value);
     });
@@ -1091,6 +1098,9 @@ async function loadUserInfo() {
 
 async function loadJobs(resumeName) {
     const container = document.getElementById("jobs-container");
+    const sortSelect = document.getElementById("sort-jobs");
+    const sortBy = sortSelect ? sortSelect.value : "match_desc";
+
     container.innerHTML = "<p style='text-align:center;'>Loading leads...</p>";
 
     if (!resumeName) return;
@@ -1107,18 +1117,45 @@ async function loadJobs(resumeName) {
             return;
         }
 
-        data.leads.forEach(lead => {
+        // --- SORTING LOGIC ---
+        let leads = [...data.leads];
+        leads.sort((a, b) => {
+            if (sortBy === "match_desc") {
+                return (b.match_score || 0) - (a.match_score || 0);
+            } else if (sortBy === "date_desc") {
+                return new Date(b.created_at) - new Date(a.created_at);
+            } else if (sortBy === "date_asc") {
+                return new Date(a.created_at) - new Date(b.created_at);
+            } else if (sortBy === "status") {
+                // simple alphabetical sort for status, or custom weight
+                // Let's favor APPLIED > IN_PROGRESS > NEW > FAILED?
+                const weights = { "APPLIED": 4, "IN_PROGRESS": 3, "NEW": 2, "FAILED": 1 };
+                return (weights[b.status] || 0) - (weights[a.status] || 0);
+            }
+            return 0;
+        });
+
+        leads.forEach(lead => {
             const div = document.createElement("div");
             div.className = "job-item";
 
             // Determine Status Color
             let statusClass = "status-new";
             if (lead.status === "APPLIED") statusClass = "status-applied";
+            if (lead.status === "IN_PROGRESS") statusClass = "status-in-progress"; // Ensure we have CSS for this or fallback
+            // Note: If no 'status-in-progress' class exists, it might fall back to default text color.
+            // We can just add inline style or verify css later.
+
+            // Format Date
+            const dateStr = lead.created_at ? new Date(lead.created_at).toLocaleDateString() : "Unknown Date";
 
             div.innerHTML = `
                 <div class="job-main-info">
                     <h3>${lead.title}</h3>
                     <p>${lead.company}</p>
+                    <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 5px;">
+                        <i class="far fa-calendar-alt"></i> Found: ${dateStr}
+                    </div>
                 </div>
                 <div class="job-meta">
                     <span class="match-score">${lead.match_score}% Match</span>

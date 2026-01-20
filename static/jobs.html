@@ -60,6 +60,16 @@
                             style="padding: 8px; border-radius: 6px; background: var(--input-bg); color: var(--text-primary); border: 1px solid var(--border-color);">
                             <option value="">Loading...</option>
                         </select>
+
+                        <span style="color: var(--text-secondary); font-size: 0.9rem; margin-left:10px;">Sort:</span>
+                        <select id="sort-jobs"
+                            style="padding: 8px; border-radius: 6px; background: var(--input-bg); color: var(--text-primary); border: 1px solid var(--border-color);">
+                            <option value="match_desc">Match % (High to Low)</option>
+                            <option value="date_desc">Date (Newest First)</option>
+                            <option value="date_asc">Date (Oldest First)</option>
+                            <option value="status">Status</option>
+                        </select>
+
                         <button id="refresh-jobs-btn" class="chip" style="margin:0;"><i
                                 class="fas fa-sync-alt"></i></button>
                     </div>
