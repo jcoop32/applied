@@ -13,3 +13,29 @@ services:
       - ./templates:/app/templates
       - ./app:/app/app
     restart: unless-stopped
+
+  mcp-supabase:
+    build: .
+    container_name: mcp-supabase
+    command: ["python", "-m", "app.mcp.supabase_server"]
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    volumes:
+      - ./app:/app/app
+      - ./data:/app/data
+    restart: unless-stopped
+
+  mcp-browser:
+    build: .
+    container_name: mcp-browser
+    command: ["python", "-m", "app.mcp.browser_server"]
+    ports:
+      - "8002:8002"
+    env_file:
+      - .env
+    volumes:
+      - ./app:/app/app
+      - ./data:/app/data
+    restart: unless-stopped
