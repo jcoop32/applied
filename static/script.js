@@ -371,10 +371,101 @@ async function loadSession(sessionId) {
         }
 
         setTimeout(scrollToBottom, 100);
+
+        // Connect to Live Log Stream
+        connectLogStream(sessionId);
+
     } catch (e) {
         console.error(e);
         addMessage("model", "❌ Failed to load chat history.");
     }
+}
+
+let activeEventSource = null;
+
+function connectLogStream(sessionId) {
+    if (activeEventSource) {
+        activeEventSource.close();
+        activeEventSource = null;
+    }
+
+    // Close any previous terminal view? Maybe keep history?
+    // distinct per session? For now, we just attach listener.
+
+    console.log("🔌 Connecting to Log Stream for", sessionId);
+    activeEventSource = new EventSource(`${API_BASE}/chat/stream/${sessionId}`);
+
+    activeEventSource.onmessage = (event) => {
+        // Default message type
+        // But we used 'log' type in python mainly.
+        // EventSource standard handles named events specifically or 'message' as default.
+        // Our python sends "event: log\ndata: ...". So we need matching listener.
+    };
+
+    activeEventSource.addEventListener("log", (event) => {
+        const msg = event.data;
+        showLogInternal(msg);
+    });
+
+    activeEventSource.addEventListener("complete", (event) => {
+        const msg = event.data;
+        showLogInternal(`✅ ${msg}`, "success");
+        // Don't close immediately, user might want to read.
+        // activeEventSource.close(); 
+    });
+
+    activeEventSource.addEventListener("error", (event) => {
+        // showLogInternal("Connection lost (Agent might be done or sleeping).", "error");
+        // Often fires on normal close too
+    });
+}
+
+function showLogInternal(text, type = "info") {
+    // 1. Find or Create Terminal UI Container
+    let terminal = document.getElementById("agent-terminal");
+    const container = document.getElementById("messages-container");
+
+    if (!terminal) {
+        terminal = document.createElement("div");
+        terminal.id = "agent-terminal";
+        terminal.className = "agent-terminal";
+        terminal.innerHTML = `
+            <div class="terminal-header" onclick="this.parentElement.classList.toggle('minimized')">
+                <span><i class="fas fa-terminal"></i> Agent Live Logs</span>
+                <span class="toggle-icon"><i class="fas fa-chevron-down"></i></span>
+            </div>
+            <div class="terminal-body" id="terminal-logs"></div>
+        `;
+        // Insert at bottom of messages container? Or fixed at bottom of screen?
+        // Fixed bottom of messages container is better contextually.
+        // Actually, maybe fixed at bottom of CHAT AREA (above input).
+
+        // Let's float it above the input area
+        const wrapper = document.querySelector(".chat-area"); // Parent of messages-container
+        if (wrapper) {
+            // We want it overlaying the bottom of the messages list, or pushing messages up?
+            // Let's put it IN message container for now, appended at end.
+            // Problem: manual scroll.
+
+            // Better: Insert it AFTER messages container, BEFORE input wrapper.
+            const inputWrapper = document.querySelector(".input-area-wrapper");
+            wrapper.insertBefore(terminal, inputWrapper);
+        }
+    }
+
+    const logBody = document.getElementById("terminal-logs");
+    if (!logBody) return;
+
+    const line = document.createElement("div");
+    line.className = `log-line log-${type}`;
+    const time = new Date().toLocaleTimeString([], { hour12: false });
+    line.innerHTML = `<span class="log-time">[${time}]</span> ${text}`;
+
+    logBody.appendChild(line);
+    logBody.scrollTop = logBody.scrollHeight;
+
+    // Ensure terminal is visible/open if new logs come in
+    terminal.classList.remove("minimized");
 }
 
 
@@ -1616,3 +1707,4 @@ async function confirmApplyToChat() {
     }
 }
 
+// End of script

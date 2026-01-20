@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, Body, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from app.api.auth import get_current_user
 from app.agents.chat_agent import ChatAgent
 from app.services.supabase_client import supabase_service
+from app.services.log_stream import log_stream_manager
 import os
 from pydantic import BaseModel
 from typing import List, Optional
@@ -294,4 +296,14 @@ async def chat_message(
         "content": response_text, 
         "session_id": session_id 
     }
+
+@router.get("/stream/{session_id}")
+async def stream_logs(session_id: str):
+    """
+    SSE Endpoint for real-time agent logs.
+    """
+    return StreamingResponse(
+        log_stream_manager.subscribe(session_id), 
+        media_type="text/event-stream"
+    )
 

@@ -3,9 +3,8 @@ FROM python:3.11-slim-bookworm
 WORKDIR /app
 
 # 1. Install system dependencies
-# These are required for Pillow, lxml, and grpcio to compile correctly
+# required for building python packages and for Playwright
 RUN apt-get update && apt-get install -y \
-    curl \
     build-essential \
     libffi-dev \
     libssl-dev \
@@ -15,25 +14,22 @@ RUN apt-get update && apt-get install -y \
     libxslt1-dev \
     zlib1g-dev \
     libjpeg-dev \
-    libfreetype6-dev \
-    liblcms2-dev \
-    libopenjp2-7-dev \
-    libtiff-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Install Python Dependencies via pip (System-wide)
+# 2. Install Python Dependencies
 COPY requirements.txt .
-
-# IMPORTANT: We do NOT upgrade pip here. 
-# The default pip (v24.0) works fine. Upgrading to pip v25.3 crashes 
-# on Docker Desktop because it can't parse the 'linuxkit' kernel version.
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 3. Install Playwright Browsers
-# This installs directly to the system location since we aren't using a venv
+# This installs chromium and its system dependencies
 RUN playwright install --with-deps chromium
 
+# 3. Code
 COPY . .
-EXPOSE 8000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Cloud Run expects the container to listen on $PORT
+# We default to 8080 if not set
+ENV PORT=8080
+
+# Run Uvicorn
+CMD exec uvicorn main:app --host 0.0.0.0 --port ${PORT}

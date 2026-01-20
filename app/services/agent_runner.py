@@ -4,6 +4,7 @@ import json
 import logging
 import asyncio
 from app.services.supabase_client import supabase_service
+from app.services.log_stream import log_stream_manager
 
 from app.agents.google_researcher import GoogleResearcherAgent
 from app.agents.matcher import MatcherAgent
@@ -39,7 +40,8 @@ def update_research_status(user_id: int, resume_filename: str, status: str):
 async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str, limit: int = 20, job_title: str = None, location: str = None, session_id: int = None):
     print(f"🕵️ Worker: Starting Research for {resume_filename} with limit {limit} (Type: Google)...")
     if session_id:
-        supabase_service.save_chat_message(session_id, "model", f"🕵️ Starting Research for **{resume_filename}**...")
+        supabase_service.save_chat_message(session_id, "model", f"fe0f Starting Research for **{resume_filename}**...")
+        await log_stream_manager.broadcast(str(session_id), f"Starting research pipeline for {resume_filename}...")
     
     update_research_status(user_id, resume_filename, "SEARCHING")
 
@@ -55,6 +57,7 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
             return
 
         # Save temp for parsing
+        if session_id: await log_stream_manager.broadcast(str(session_id), "Downloading resume file...")
         import uuid
         tmp_id = str(uuid.uuid4())
         tmp_path = f"/tmp/{tmp_id}_{resume_filename}"
@@ -67,6 +70,7 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
         parser = ResumeParser(api_key=api_key)
 
         # Parse returns a JSON string, we need to load it
+        if session_id: await log_stream_manager.broadcast(str(session_id), "Parsing resume with Gemini 2.5 Flash...")
         parsed_json_str = await parser.parse_to_json(tmp_path)
 
         # Guard against Non-string return (e.g. None)
@@ -101,6 +105,7 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
 
         # 3. Research
         print("🔎 Using Google Verification Agent...")
+        if session_id: await log_stream_manager.broadcast(str(session_id), f"Searching Google for top {limit} jobs (this may take a moment)...")
         researcher = GoogleResearcherAgent(api_key=api_key)
              
         # We use the DYNAMIC profile_blob here
@@ -112,6 +117,7 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
             lead['query_source'] = f"{prefix}|{lead.get('query_source', 'Unknown')}"
 
         # 4. Match
+        if session_id: await log_stream_manager.broadcast(str(session_id), f"Found {len(leads)} raw leads. analyzing matches with Matcher Agent...")
         matcher = MatcherAgent(api_key=api_key)
         scored_matches = await matcher.filter_and_score_leads(leads, profile_blob, limit=10)
 
@@ -136,11 +142,13 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
         update_research_status(user_id, resume_filename, "COMPLETED")
         
         if session_id:
+            await log_stream_manager.broadcast(str(session_id), f"Done! Found {len(scored_matches)} matches.", type="complete")
             supabase_service.save_chat_message(session_id, "model", f"✅ Research Complete! Found **{len(scored_matches)}** matches.\n\nCheck the **Jobs** tab or reload your dashboard.")
 
     except asyncio.CancelledError:
         print(f"🛑 Worker: Research Cancelled for {resume_filename}")
         if session_id:
+            await log_stream_manager.broadcast(str(session_id), "Research cancelled by user.", type="error")
             supabase_service.save_chat_message(session_id, "model", "🛑 Research Cancelled by user.")
         update_research_status(user_id, resume_filename, "CANCELLED")
         
@@ -160,6 +168,7 @@ async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, a
     print(f"🚀 Worker: Applying to {job_url} ...")
     if session_id:
         supabase_service.save_chat_message(session_id, "model", f"🚀 Starting Application to **{job_url}**...")
+        await log_stream_manager.broadcast(str(session_id), f"Initializing application agent for: {job_url}")
     
     # Resolve Lead ID for status updates
     user_id = user_profile.get("user_id") or user_profile.get("id")
@@ -183,12 +192,15 @@ async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, a
         # Detect environment for headless mode
         is_headless = os.getenv("HEADLESS", "false").lower() == "true" or os.getenv("GITHUB_ACTIONS") == "true"
         applier = ApplierAgent(api_key=api_key, headless=is_headless)
+        if session_id: await log_stream_manager.broadcast(str(session_id), f"Launching browser (Headless={is_headless}, Cloud={use_cloud})...")
+        
         # Pass lead_id and instructions to apply method
         result_status = await applier.apply(job_url, user_profile, resume_path, lead_id=lead_id, use_cloud=use_cloud, session_id=session_id, instructions=instructions)
         
         print(f"🏁 Worker: Applier finished: {result_status}")
         
         if session_id:
+            await log_stream_manager.broadcast(str(session_id), f"Application finished: {result_status}", type="complete")
             supabase_service.save_chat_message(session_id, "model", f"🏁 Application Finished. Status: **{result_status}**")
         
         if lead_id:
