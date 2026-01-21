@@ -1054,7 +1054,7 @@ async function loadResumesForModal() {
         listContainer.innerHTML = "";
 
         if (!Array.isArray(resumes) || resumes.length === 0) {
-            listContainer.innerHTML = "<p>No resu found. Upload one first!</p>";
+            listContainer.innerHTML = "<p>No resume found. Upload one first!</p>";
             return;
         }
 

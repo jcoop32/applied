@@ -153,12 +153,13 @@ class SupabaseService:
     def get_user_by_email(self, email: str):
         """
         Fetches a user by email from the 'users' table.
+        Only fetches auth fields: id, email, password_hash, created_at
         """
         if not self.client:
             return None
 
         try:
-            response = self.client.table("users").select("*").eq("email", email).execute()
+            response = self.client.table("users").select("id, email, password_hash, created_at").eq("email", email).execute()
             if response.data:
                 return response.data[0]
             return None
@@ -166,37 +167,67 @@ class SupabaseService:
             print(f"❌ Supabase User Fetch Error: {e}")
             return None
 
+    def get_user_profile(self, user_id: int):
+        """
+        Fetches the user's profile from the 'profiles' table.
+        """
+        if not self.client:
+            return None
+        try:
+            response = self.client.table("profiles").select("*").eq("user_id", user_id).execute()
+            if response.data:
+                return response.data[0]
+            # Fallback if profile missing (shouldn't happen with trigger)
+            return None 
+        except Exception as e:
+            print(f"❌ Supabase Profile Fetch Error: {e}")
+            return None
+
     def create_user(self, email: str, password_hash: str, full_name: str = None):
         """
         Creates a new user in the 'users' table.
+        The DB Trigger 'on_auth_user_created' will auto-create the 'profiles' row.
+        If full_name is provided, we update the profile immediately after.
         """
         if not self.client:
             raise Exception("Supabase client not initialized")
 
         try:
+            # 1. Insert into Users (Auth only)
             data = {
                 "email": email,
-                "password_hash": password_hash,
-                "full_name": full_name
+                "password_hash": password_hash
             }
             response = self.client.table("users").insert(data).execute()
+            
             if response.data:
-                return response.data[0]
+                user = response.data[0]
+                user_id = user['id']
+                
+                # 2. Update Profile with Full Name if provided
+                if full_name:
+                    try:
+                        self.update_user_profile(user_id, {"full_name": full_name})
+                        user['full_name'] = full_name # Return composite object for immediate UI use
+                    except Exception as pe:
+                        print(f"⚠️ Failed to update profile name: {pe}")
+                
+                return user
             return None
         except Exception as e:
             print(f"❌ Supabase User Create Error: {e}")
-            # Likely duplicate email error
             raise e
 
     def update_user_profile(self, user_id: int, data: dict):
         """
-        Updates the user's profile data (e.g. primary_resume_name, profile_data).
+        Updates the user's profile data in the 'profiles' table.
         """
         if not self.client:
             raise Exception("Supabase client not initialized")
 
         try:
-            response = self.client.table("users").update(data).eq("id", user_id).execute()
+            # ensure data only contains profile fields
+            response = self.client.table("profiles").update(data).eq("user_id", user_id).execute()
             if response.data:
                 return response.data[0]
             return None
@@ -206,15 +237,14 @@ class SupabaseService:
 
     def get_research_status(self, user_id: int):
         """
-        Fetches only the 'profile_data' for the user to check research status.
+        Fetches only the 'profile_data' from 'profiles' table.
         """
         if not self.client:
             return {}
 
         try:
-            response = self.client.table("users").select("profile_data").eq("id", user_id).execute()
+            response = self.client.table("profiles").select("profile_data").eq("user_id", user_id).execute()
             if response.data:
-                # Returns dict with 'profile_data' key
                 return response.data[0].get('profile_data', {})
             return {}
         except Exception as e:

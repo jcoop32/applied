@@ -51,16 +51,23 @@ parser = ResumeParser(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 @router.get("")
 async def get_profile(current_user: dict = Depends(get_current_user)):
     """
-    Get current user profile (including primary_resume_name and profile_data).
+    Get current user profile (merging Auth data and Profile data).
     """
-    # Force refresh user data from DB to get latest columns
-    user = supabase_service.get_user_by_email(current_user['email'])
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    # 1. Fetch Profile Data
+    profile = supabase_service.get_user_profile(current_user['id'])
+    
+    # 2. Merge with Current User (Email, ID)
+    if profile:
+        # Merge, ensuring we don't overwrite critical auth fields if namespace collides (which it shouldn't)
+        merged_user = {**current_user, **profile}
+    else:
+        # Should ideally not happen if Trigger works, but fallback to just auth info
+        merged_user = current_user
 
-    # Remove password hash for security
-    user.pop('password_hash', None)
-    return user
+    # Remove sensitive data
+    merged_user.pop('password_hash', None)
+    
+    return merged_user
 
 @router.patch("")
 async def update_profile(
@@ -80,12 +87,15 @@ async def update_profile(
     if not clean_data:
         raise HTTPException(status_code=400, detail="No valid fields to update")
 
-    updated_user = supabase_service.update_user_profile(user_id, clean_data)
-    if not updated_user:
+    # Update Profiles Table
+    updated_profile = supabase_service.update_user_profile(user_id, clean_data)
+    if not updated_profile:
         raise HTTPException(status_code=500, detail="Failed to update profile")
 
-    updated_user.pop('password_hash', None)
-    return updated_user
+    # Merge for return
+    merged_user = {**current_user, **updated_profile}
+    merged_user.pop('password_hash', None)
+    return merged_user
 
 @router.post("/parse")
 async def parse_resume(
