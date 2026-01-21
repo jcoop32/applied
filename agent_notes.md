@@ -12,3 +12,8 @@
 **Context:** Establishing connection to MCP server via `mcp_bridge.py`.
 **Root Cause:** Persistent timeouts ("context deadline exceeded"). Likely due to aggressive default timeouts in `sse_client` or environment-specific latency.
 **Solution:** Updated `mcp_bridge.py` to use `timeout=None` and `sse_read_timeout=None` (disabling timeouts) and added `traceback.print_exc()` to debug specific underlying failures.
+
+## Issue: MCP Server Connection Failed (ConnectError)
+**Context:** Connecting to local Dockerized MCP servers (browser, supabase) via `mcp_bridge.py`.
+**Root Cause:** `httpcore` / `anyio` connection failures on macOS when resolving `localhost`. IPv6 resolution or firewall issues prevent reliable connections to Docker ports despite being mapped to `0.0.0.0`.
+**Solution:** Added logic to `app/mcp/mcp_bridge.py` to automatically replace `localhost` with `127.0.0.1` in the connection URL, bypassing resolution ambiguity.

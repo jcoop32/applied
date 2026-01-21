@@ -14,6 +14,12 @@ import traceback
 # ... imports ...
 
 async def run_bridge(url: str):
+    # Fix for macOS/Docker localhost resolution issues
+    # httpcore often fails with "All connection attempts failed" when resolving localhost if IPv6 is involved but not listening
+    if "localhost" in url:
+        sys.stderr.write(f"Info: Replacing 'localhost' with '127.0.0.1' in {url} for reliable Docker connection.\n")
+        url = url.replace("localhost", "127.0.0.1")
+
     try:
         sys.stderr.write(f"Connecting to {url}...\n")
         # Connect to the SSE endpoint using the official client helper
