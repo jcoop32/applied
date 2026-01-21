@@ -37,10 +37,24 @@ def get_user_profile(email: str) -> str:
     """
     Get user profile data by email.
     """
+    # 1. Get User ID from Auth
     user = supabase_service.get_user_by_email(email)
     if not user:
         return "User not found"
-    return str(user)
+    
+    # 2. Get Profile Data
+    profile = supabase_service.get_user_profile(user['id'])
+    
+    # 3. Merge
+    if profile:
+        full_data = {**user, **profile}
+    else:
+        full_data = user
+        
+    # Remove sensitive
+    full_data.pop('password_hash', None)
+    
+    return str(full_data)
 
 @mcp.resource("leads://{user_id}/pending")
 def get_pending_leads(user_id: int) -> str:

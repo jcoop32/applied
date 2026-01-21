@@ -75,9 +75,9 @@
             <div class="input-area-wrapper">
                 <!-- Action Chips -->
                 <div class="action-chips">
-                    <button class="chip research-btn" onclick="triggerResearch()"
+                    <button class="chip research-btn" onclick="openSearchConfigModal()"
                         style="background: linear-gradient(135deg, #4285f4, #34a853); border: none;">
-                        <i class="fas fa-robot"></i> Start Researcher
+                        <i class="fas fa-search"></i> Find Jobs
                     </button>
                     <button class="chip" id="attach-resume-btn">
                         <i class="fas fa-paperclip"></i> Attach Resume
@@ -113,6 +113,52 @@
             </div>
             <div class="modal-body" id="resume-list-container">
                 <p>Loading...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Search Configuration Modal -->
+    <div id="search-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Search Configuration</h3>
+                <span class="close-modal close-search-modal">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div style="margin-bottom: 20px;">
+                    <label
+                        style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 0.9rem;">Job
+                        Titles (comma separated)</label>
+                    <input type="text" id="search-titles" placeholder="e.g. Python Developer, Backend Engineer"
+                        style="width: 100%; padding: 10px; border-radius: 6px; background: var(--input-bg); color: var(--text-primary); border: 1px solid var(--border-color);">
+                </div>
+                <div style="margin-bottom: 20px;">
+                    <label
+                        style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 0.9rem;">Location</label>
+                    <input type="text" id="search-location" placeholder="e.g. Remote, San Francisco, CA"
+                        style="width: 100%; padding: 10px; border-radius: 6px; background: var(--input-bg); color: var(--text-primary); border: 1px solid var(--border-color);">
+                </div>
+                <div style="margin-bottom: 20px;">
+                    <label
+                        style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 0.9rem;">Max
+                        Results</label>
+                    <input type="number" id="search-limit" value="10" min="1" max="20"
+                        style="width: 100%; padding: 10px; border-radius: 6px; background: var(--input-bg); color: var(--text-primary); border: 1px solid var(--border-color);">
+                </div>
+                <div style="margin-bottom: 20px;">
+                    <label
+                        style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 0.9rem;">Resume
+                        Context</label>
+                    <select id="search-resume-select"
+                        style="width: 100%; padding: 10px; border-radius: 6px; background: var(--input-bg); color: var(--text-primary); border: 1px solid var(--border-color);"></select>
+                </div>
+
+                <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                    <button id="confirm-search-btn"
+                        style="width: 100%; padding: 12px; background: var(--accent-color); color: #000; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 1rem;">
+                        <i class="fas fa-search"></i> Start Search
+                    </button>
+                </div>
             </div>
         </div>
     </div>

@@ -154,9 +154,16 @@ async def parse_resume(
         # --- Data Transformation (Flat -> Profile Schema) ---
         transformed_data = parser.map_to_schema(parsed_data)
 
-        # 6. Auto-Save to Profile
+        # 6. Auto-Save to Profile (Merge with existing)
+        # Fetch existing to preserve voluntary questions (race, veteran, etc.) which aren't in resume
+        existing_profile = supabase_service.get_user_profile(user_id)
+        existing_data = existing_profile.get("profile_data", {}) if existing_profile else {}
+
+        # Merge: parsed data overwrites conflicting keys, but keeps unique existing keys
+        merged_data = {**existing_data, **transformed_data}
+
         # We also want to update the root full_name if found
-        update_payload = {"profile_data": transformed_data}
+        update_payload = {"profile_data": merged_data}
         if "full_name" in parsed_data and parsed_data["full_name"]:
             update_payload["full_name"] = parsed_data["full_name"]
 

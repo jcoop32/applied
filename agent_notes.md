@@ -17,3 +17,13 @@
 **Context:** Connecting to local Dockerized MCP servers (browser, supabase) via `mcp_bridge.py`.
 **Root Cause:** `httpcore` / `anyio` connection failures on macOS when resolving `localhost`. IPv6 resolution or firewall issues prevent reliable connections to Docker ports despite being mapped to `0.0.0.0`.
 **Solution:** Added logic to `app/mcp/mcp_bridge.py` to automatically replace `localhost` with `127.0.0.1` in the connection URL, bypassing resolution ambiguity.
+
+## Issue: SyntaxError 'expected except or finally block' in ChatAgent
+**Context:** Deployment/Docker startup failed with a `SyntaxError` in `app/agents/chat_agent.py`.
+**Root Cause:** An unclosed `try:` block at line 18 wrapped the initialization logic but lacked a corresponding `except` block. A subsequent helper function definition broke the expected block structure.
+**Solution:** Removed the invalid `try` block and dedented the initialization logic. Later re-added a correctly scoped `try/except` block around the main `generate_content_stream` failure point to ensure robust error handling without syntax errors.
+
+## Issue: 'Storage endpoint URL should have a trailing slash'
+**Context:** Supabase client initialization logged a warning about the storage URL format.
+**Root Cause:** The `supabase-py` storage client might warn if the URL format isn't perfect, but previous attempts to manually append a slash `url += "/"` **caused** this warning or a double-slash issue in some versions.
+**Solution:** Removed the manual slash appending. Passing `SUPABASE_URL` as-is (without trailing slash) resolves the warning in this environment. Verified that `list` and `get_public_url` work correctly without the manual slash.

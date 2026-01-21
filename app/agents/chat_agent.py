@@ -9,10 +9,11 @@ class ChatAgent:
         self.client = genai.Client(api_key=api_key)
         self.model_id = 'gemini-2.0-flash-exp' # Using Flash for speed/cost
 
-    async def generate_response(self, user_id: int, message: str, history: list, available_resumes: list = []) -> dict:
+    async def generate_response_stream(self, user_id: int, message: str, history: list, available_resumes: list = []):
         """
-        Generates a response from the "Resume Expert" persona.
-        Returns a dict: { "role": "model", "content": str, "action": dict|None }
+        Generates a streaming response from the "Resume Expert" persona.
+        Yields chunks of text: { "type": "token", "content": str }
+        Yields final action: { "type": "action", "payload": dict }
         """
         # 1. Fetch User Context (Profile, Research Status, etc.)
         profile_data = supabase_service.get_research_status(user_id) # Returns dict of profile_data
@@ -113,10 +114,10 @@ class ChatAgent:
         ))
 
         try:
-            # Generate with Tools
-            # IMPORTANT: Disable automatic function calling so we can intercept the call
-            # and return it as an action to the API layer.
-            response = self.client.models.generate_content(
+            # Generate with Stream
+            # Note: We rely on the synchronous client here, but wrapped in async generator.
+            # Ideally we'd use async client if available, but this works for thread/latency.
+            response_stream = self.client.models.generate_content_stream(
                 model=self.model_id,
                 contents=contents,
                 config=genai.types.GenerateContentConfig(
@@ -127,58 +128,53 @@ class ChatAgent:
                 )
             )
 
-            print(f"🤖 RAW GEMINI RESPONSE: {response}") # DEBUG LOG
-
-            # Check for Function Calls
+            accumulated_text = ""
             action = None
-            response_text = ""
+            
+            for chunk in response_stream:
+                # Check for Function Calls
+                # Function calls in streaming usually appear in specific chunks.
+                if chunk.function_calls:
+                    fc = chunk.function_calls[0]
+                    func_name = fc.name
+                    func_args = dict(fc.args)
+                    
+                    if func_name == "search_jobs":
+                        action = { "type": "research", "payload": func_args }
+                        msg = f"\n\n🚀 Starting research for **{func_args.get('limit', 20)}** jobs..."
+                        accumulated_text += msg
+                        yield { "type": "token", "content": msg }
+                    
+                    elif func_name == "apply_to_job":
+                        action = { "type": "apply", "payload": func_args }
+                        msg = f"\n\n📝 Starting application..."
+                        accumulated_text += msg
+                        yield { "type": "token", "content": msg }
 
-            # Standard text part
-            if response.text:
-                response_text = response.text
+                    elif func_name == "ask_clarification":
+                        action = { "type": "clarification", "payload": func_args }
+                        # No extra text needed usually, but logic might vary
+                        
+                # Check for Text
+                if chunk.text:
+                    text_chunk = chunk.text
+                    accumulated_text += text_chunk
+                    yield { "type": "token", "content": text_chunk }
 
-            # Check function calls
-            if response.function_calls:
-                fc = response.function_calls[0] # Handle first call
-                func_name = fc.name
-                func_args = dict(fc.args)
-                
-                if func_name == "search_jobs":
-                    action = {
-                        "type": "research",
-                        "payload": func_args
-                    }
-                    response_text += f"\n\n🚀 Starting research for **{func_args.get('limit', 20)}** jobs using resume **{func_args.get('resume_filename')}**..."
-                
-                elif func_name == "apply_to_job":
-                    action = {
-                        "type": "apply",
-                        "payload": func_args
-                    }
-                    response_text += f"\n\n📝 Starting application for **{func_args.get('job_url')}**..."
+            # If no text and no action, fallback
+            if not accumulated_text and not action:
+                fallback = "I'm on it."
+                yield { "type": "token", "content": fallback }
+                accumulated_text = fallback
 
-                elif func_name == "ask_clarification":
-                    action = {
-                        "type": "clarification",
-                        "payload": func_args
-                    }
-                    # Text usually comes from model part anyway, but we can append if needed/missing
-                    # response_text += f"\n\n{func_args.get('question')}" 
-                    pass
-
-            if not response_text and action:
-                response_text = "I'm on it."
-
-            return {
-                "role": "model",
-                "content": response_text,
+            # Yield Final Action/Done
+            yield {
+                "type": "end",
+                "content": accumulated_text,
                 "action": action
             }
 
         except Exception as e:
             print(f"Gemini Chat Error: {e}")
-            return {
-                "role": "model", 
-                "content": "I'm having trouble connecting to my brain right now. Please try again.",
-                "action": None
-            }
+            yield { "type": "token", "content": "\n\n(I'm having trouble thinking right now. Please try again.)" }
+            yield { "type": "end", "content": f"Error: {str(e)}", "action": None }

@@ -124,9 +124,11 @@ function initChatPage() {
     // Expose global actions
     window.triggerResearch = triggerResearch;
     window.triggerApply = triggerApply;
+    window.openSearchConfigModal = openSearchConfigModal;
 
     initMentionSystem();
     initAttachResume();
+    initSearchModal();
 
     // Check for pending apply prompt from Jobs page
     const pendingPrompt = localStorage.getItem('pendingApplyPrompt');
@@ -529,6 +531,8 @@ function addMessage(role, content, isHistoryLoad = false, buttons = []) {
 
     container.appendChild(msgDiv);
     scrollToBottom();
+
+    return contentDiv; // Return for streaming updates
 }
 
 async function sendMessage() {
@@ -544,20 +548,19 @@ async function sendMessage() {
 
     addMessage("user", text);
 
-    // Loading
-    const loadingId = "loading-" + Date.now();
-    const container = document.getElementById("messages-container");
-    const loadingDiv = document.createElement("div");
-    loadingDiv.id = loadingId;
-    loadingDiv.className = "message bot-message loading-msg";
-    loadingDiv.innerHTML = `<div class="avatar"><i class="fas fa-robot"></i></div><div class="content"><i class="fas fa-ellipsis-h fa-spin"></i></div>`;
-    container.appendChild(loadingDiv);
-    scrollToBottom();
+    // Create Bot Message Placeholder
+    const botContentDiv = addMessage("model", "");
+    const loadingIcon = document.createElement("i");
+    loadingIcon.className = "fas fa-ellipsis-h fa-spin";
+    botContentDiv.appendChild(loadingIcon);
+
+    // Keep track of full text for markdown rendering
+    let fullText = "";
 
     try {
         const payload = {
             message: text,
-            session_id: currentSessionId // Send null if new, backend will create and return ID
+            session_id: currentSessionId
         };
 
         const res = await authFetch(`${API_BASE}/chat/message`, {
@@ -568,22 +571,115 @@ async function sendMessage() {
 
         if (!res.ok) throw new Error("API Error");
 
-        const data = await res.json();
+        // Streaming Reader
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let firstChunk = true;
 
-        // Update Session ID if new
-        if (!currentSessionId && data.session_id) {
-            currentSessionId = data.session_id;
-            localStorage.setItem('currentChatSessionId', data.session_id);
-            loadSessions(); // Refresh list to show new chat
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            if (firstChunk) {
+                loadingIcon.remove(); // Remove spinner on first byte
+                firstChunk = false;
+            }
+
+            buffer += decoder.decode(value, { stream: true });
+            let lines = buffer.split("\n");
+            buffer = lines.pop(); // Keep incomplete line
+
+            for (const line of lines) {
+                if (!line.trim()) continue;
+                try {
+                    const data = JSON.parse(line);
+
+                    if (data.type === "meta") {
+                        if (!currentSessionId && data.session_id) {
+                            currentSessionId = data.session_id;
+                            localStorage.setItem('currentChatSessionId', data.session_id);
+                            loadSessions();
+                        }
+                    }
+                    else if (data.type === "token") {
+                        fullText += data.content;
+                        // Re-render with basic markdown
+                        botContentDiv.innerHTML = fullText
+                            .replace(/\n/g, '<br>')
+                            .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+                        scrollToBottom();
+                    }
+                    else if (data.type === "end") {
+                        // Handle Buttons/Actions if any
+                        if (data.buttons) {
+                            // Re-use logic to add buttons? 
+                            // We don't have a clean way to add buttons to existing msg via helper,
+                            // so we manually do it here or call a helper.
+                            // But addMessage handles buttons at creation.
+                            // Let's just append them.
+                            const btnContainer = document.createElement("div");
+                            btnContainer.className = "chat-buttons";
+                            btnContainer.style.marginTop = "10px";
+                            btnContainer.style.display = "flex";
+                            btnContainer.style.gap = "8px";
+                            btnContainer.style.flexWrap = "wrap";
+
+                            (data.buttons || []).forEach(btnText => {
+                                const btn = document.createElement("button");
+                                btn.className = "chip";
+                                btn.textContent = btnText;
+                                btn.style.fontSize = "0.9rem";
+                                btn.style.cursor = "pointer";
+                                btn.onclick = () => {
+                                    const chatInput = document.getElementById("chat-input");
+                                    if (chatInput) {
+                                        chatInput.value = btnText;
+                                        sendMessage();
+                                    }
+                                };
+                                btnContainer.appendChild(btn);
+                            });
+                            botContentDiv.appendChild(btnContainer);
+                        }
+
+                        // Handles final action payload buttons (clarification)
+                        if (data.action && data.action.type === "clarification") {
+                            const opts = data.action.payload.options || [];
+                            if (opts.length > 0) {
+                                const btnContainer = document.createElement("div");
+                                btnContainer.className = "chat-buttons";
+                                btnContainer.style.marginTop = "10px";
+                                btnContainer.style.display = "flex";
+                                btnContainer.style.gap = "8px";
+                                btnContainer.style.flexWrap = "wrap";
+
+                                opts.forEach(btnText => {
+                                    const btn = document.createElement("button");
+                                    btn.className = "chip";
+                                    btn.textContent = btnText;
+                                    btn.style.fontSize = "0.9rem";
+                                    btn.style.cursor = "pointer";
+                                    btn.onclick = () => {
+                                        const chatInput = document.getElementById("chat-input");
+                                        if (chatInput) {
+                                            chatInput.value = btnText;
+                                            sendMessage();
+                                        }
+                                    };
+                                    btnContainer.appendChild(btn);
+                                });
+                                botContentDiv.appendChild(btnContainer);
+                            }
+                        }
+                    }
+
+                } catch (e) { console.error("Stream Parse Error", e); }
+            }
         }
 
-        loadingDiv.remove();
-        addMessage("model", data.content, false, data.buttons);
-
     } catch (e) {
-        const el = document.getElementById(loadingId);
-        if (el) el.remove();
-        addMessage("model", "Sorry, something went wrong.");
+        addMessage("model", `Sorry, something went wrong: ${e.message}`);
         console.error(e);
     } finally {
         sendBtn.disabled = false;
@@ -647,26 +743,115 @@ async function checkResearcherVisibility() {
 }
 
 async function triggerResearch() {
-    addMessage("user", `Start Researcher`);
-    try {
-        const profileRes = await authFetch(`${API_BASE}/profile`);
-        const profileData = await profileRes.json();
-        const resumeName = profileData.primary_resume_name;
+    // Legacy support or fallback
+    openSearchConfigModal();
+}
 
-        if (!resumeName) {
-            addMessage("model", "Please upload a resume first.");
-            return;
+function initSearchModal() {
+    const modal = document.getElementById("search-modal");
+    const closeBtn = document.querySelector(".close-search-modal");
+    const confirmBtn = document.getElementById("confirm-search-btn");
+
+    if (closeBtn && modal) {
+        closeBtn.addEventListener("click", () => {
+            modal.style.display = "none";
+        });
+    }
+
+    if (confirmBtn) {
+        // Remove old listeners
+        const newBtn = confirmBtn.cloneNode(true);
+        confirmBtn.parentNode.replaceChild(newBtn, confirmBtn);
+        newBtn.addEventListener("click", confirmSearch);
+    }
+
+    window.addEventListener("click", (event) => {
+        if (event.target == modal) {
+            modal.style.display = "none";
         }
+    });
+}
 
-        addMessage("model", `Starting research with **${resumeName}**...`);
+async function openSearchConfigModal() {
+    console.log("Opening Search Modal");
+    const modal = document.getElementById("search-modal");
+    const resumeSelect = document.getElementById("search-resume-select");
+    if (!modal) return;
+
+    // Load Resumes
+    if (resumeSelect) {
+        resumeSelect.innerHTML = '<option value="">Loading...</option>';
+        try {
+            const res = await authFetch(`${API_BASE}/resumes`);
+            const resumes = await res.json();
+
+            // Get Primary Resume
+            const profileRes = await authFetch(`${API_BASE}/profile`);
+            const profile = await profileRes.json();
+            const primaryResume = profile.primary_resume_name;
+
+            resumeSelect.innerHTML = '';
+            if (resumes.length === 0) {
+                resumeSelect.innerHTML = '<option value="">No resumes found</option>';
+            } else {
+                resumes.forEach(r => {
+                    const opt = document.createElement('option');
+                    opt.value = r.name;
+                    opt.textContent = r.name;
+                    if (r.name === primaryResume) opt.selected = true;
+                    resumeSelect.appendChild(opt);
+                });
+            }
+        } catch (e) {
+            console.error("Error loading resumes for search modal", e);
+            resumeSelect.innerHTML = '<option>Error loading context</option>';
+        }
+    }
+
+    modal.style.display = "block";
+}
+
+async function confirmSearch() {
+    console.log("Confirming search...");
+    const titlesInput = document.getElementById("search-titles");
+    const locationInput = document.getElementById("search-location");
+    const limitInput = document.getElementById("search-limit");
+    const resumeSelect = document.getElementById("search-resume-select");
+    const modal = document.getElementById("search-modal");
+
+    const titles = titlesInput.value.trim();
+    const location = locationInput.value.trim();
+    const limit = parseInt(limitInput.value) || 10;
+    const resumeName = resumeSelect.value;
+
+    if (!resumeName) {
+        alert("Please select a resume context.");
+        return;
+    }
+
+    // Close Modal
+    modal.style.display = "none";
+
+    // UX Feedback in Chat
+    let msg = `Start Researcher with **${resumeName}**`;
+    if (titles) msg += ` for **${titles}**`;
+    if (location) msg += ` in **${location}**`;
+    addMessage("user", msg);
+
+    addMessage("model", `Starting research...`);
+
+    try {
+        const payload = {
+            resume_filename: resumeName,
+            limit: limit,
+            job_title: titles,
+            location: location
+        };
 
         const res = await authFetch(`${API_BASE}/agents/research`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                resume_filename: resumeName,
-                limit: 10
-            })
+            body: JSON.stringify(payload)
         });
 
         if (res.ok) {
@@ -674,12 +859,15 @@ async function triggerResearch() {
             // Start Polling
             pollResearchStatus(resumeName);
 
-            // Show Cancel Button if we have a session ID
             if (data.session_id) {
                 addCancelButtonMessage(data.session_id);
             }
+        } else {
+            console.error("Research start failed", await res.text());
+            addMessage("model", "❌ Failed to start research.");
         }
     } catch (e) {
+        console.error("Error confirmSearch:", e);
         addMessage("model", "❌ Error starting research.");
     }
 }
@@ -710,7 +898,12 @@ async function initProfilePage() {
                 "portfolio": p.portfolio,
                 "address": p.address,
                 "summary": p.summary,
-                "skills": p.skills ? p.skills.join(", ") : ""
+                "skills": p.skills ? p.skills.join(", ") : "",
+                "salary_expectations": p.salary_expectations,
+                "race": p.race,
+                "veteran": p.veteran,
+                "disability": p.disability,
+                "authorization": p.authorization
             };
 
             for (let id in map) {
@@ -862,10 +1055,15 @@ async function initProfilePage() {
 }
 
 async function triggerApply(url, title, mode = null) {
+    console.log("Triggering Apply:", url, title);
     // If no mode specified, prompt user for choice
     if (!mode) {
+        console.log("Prompting for mode...");
         const choice = await showApplyModeModal(url, title);
-        if (!choice) return; // User cancelled
+        if (!choice) {
+            console.log("Apply cancelled by user");
+            return;
+        }
         mode = choice;
     }
 
@@ -891,10 +1089,11 @@ async function triggerApply(url, title, mode = null) {
                 addCancelButtonMessage(data.session_id);
             }
         } else {
+            console.error("Apply start failed", await res.text());
             addMessage("model", "❌ Failed to start application.");
         }
     } catch (e) {
-        console.error(e);
+        console.error("Error triggering apply", e);
         addMessage("model", "❌ Error starting application.");
     }
 }
