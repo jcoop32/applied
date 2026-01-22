@@ -59,7 +59,7 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
     print(f"🕵️ Worker: Starting Research for {resume_filename} with limit {limit} (Type: Google)...")
     
     # Broadcast Function helper
-    async def log(msg, type="log"):
+    async def log(msg, type="log", status="SEARCHING"):
         if session_id:
             await log_stream_manager.broadcast(str(session_id), msg, type=type)
         
@@ -67,7 +67,8 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
         # We only do this for major info logs to avoid DB Thrashing
         if type in ["log", "complete", "error", "warning"]:
              # Run in background to not block
-             asyncio.create_task(asyncio.to_thread(update_research_status, user_id, resume_filename, "SEARCHING", last_log=msg))
+             # FIX: Use the passed 'status' argument instead of hardcoded "SEARCHING"
+             asyncio.create_task(asyncio.to_thread(update_research_status, user_id, resume_filename, status, last_log=msg))
 
     await log(f"Starting research pipeline for {resume_filename}...")
     
@@ -180,9 +181,13 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
         print("🔎 Using Google Verification Agent...")
         await log(f"Searching Google for top {limit} jobs (this may take a moment)...")
         researcher = GoogleResearcherAgent(api_key=api_key)
+        
+        # Define Callback
+        async def cancel_check_cb():
+            return await check_cancellation(user_id, resume_filename)
              
         # We use the DYNAMIC profile_blob here
-        leads = await researcher.gather_leads(profile_blob, limit=limit, job_title=job_title, location=location)
+        leads = await researcher.gather_leads(profile_blob, limit=limit, job_title=job_title, location=location, should_stop_callback=cancel_check_cb)
 
         # Prefix query_source for UI identification
         prefix = "GOOGLE"
@@ -216,17 +221,20 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
         supabase_service.save_leads_bulk(user_id, resume_filename, scored_matches)
 
         print(f"✅ Worker: Research Completed. Saved {len(scored_matches)} matches.")
-        update_research_status(user_id, resume_filename, "COMPLETED")
+        # FINAL STATUS UPDATE handled by log? No, we do it explicitly below.
+        # But we must update 'status' to COMPLETED.
         
-        await log(f"Done! Found {len(scored_matches)} matches.", type="complete")
+        await log(f"Done! Found {len(scored_matches)} matches.", type="complete", status="COMPLETED")
         if session_id:
             supabase_service.save_chat_message(session_id, "model", f"✅ Research Complete! Found **{len(scored_matches)}** matches.\n\nCheck the **Jobs** tab or reload your dashboard.")
 
     except asyncio.CancelledError:
         print(f"🛑 Worker: Research Cancelled for {resume_filename}")
-        await log("Research cancelled by user.", type="error")
+        # RACE CONDITION FIX: Explicitly set status to CANCELLED here via log
+        await log("Research cancelled by user.", type="error", status="CANCELLED")
         if session_id:
             supabase_service.save_chat_message(session_id, "model", "🛑 Research Cancelled by user.")
+        # Redundant but safe update
         update_research_status(user_id, resume_filename, "CANCELLED")
         
     except Exception as e:

@@ -114,7 +114,7 @@ class GoogleResearcherAgent:
             print(f"⚠️ Strategy Generation Error: {e}")
             return [f"site:boards.greenhouse.io Software Engineer"]
 
-    async def gather_leads(self, profile: dict, limit: int = 100, job_title: str = None, location: str = None) -> List[Dict[str, Any]]:
+    async def gather_leads(self, profile: dict, limit: int = 15, job_title: str = None, location: str = None, should_stop_callback=None) -> List[Dict[str, Any]]:
         """
         Executes Google Search queries to find direct ATS links.
         """
@@ -140,6 +140,11 @@ class GoogleResearcherAgent:
         try:
             async def process_query(query: str):
                 async with semaphore:
+                    # DEEP CANCELLATION CHECK
+                    if should_stop_callback and await should_stop_callback():
+                        print(f"🛑 Deep Cancel: Stopping query '{query}'")
+                        return []
+
                     if len(all_leads) >= limit: return []
                     
                     print(f"🔎 Brave Search: '{query}'")
@@ -167,6 +172,11 @@ class GoogleResearcherAgent:
                         
                         # Add random delay to be a good citizen
                         await asyncio.sleep(random.uniform(1.0, 2.0))
+                        
+                        # POST-DELAY CANCELLATION CHECK
+                        if should_stop_callback and await should_stop_callback():
+                             print(f"🛑 Deep Cancel: Stopping after delay '{query}'")
+                             return []
 
 
                         # Instantiate Browser FRESH for this query to avoid CDP errors
@@ -182,7 +192,24 @@ class GoogleResearcherAgent:
                         try:
                             # Use the fresh browser instance
                             agent = Agent(task=task_prompt, llm=self.llm, browser=browser, use_vision=False)
-                            history = await agent.run()
+                            
+                            # SUPER DEEP CANCELLATION: Wrap agent.run() in a task and monitor it
+                            agent_task = asyncio.create_task(agent.run())
+                            
+                            while not agent_task.done():
+                                # Check for cancellation every 0.5s
+                                if should_stop_callback and await should_stop_callback():
+                                    print(f"🛑 Deep Cancel: Aborting active browser task for '{query}'")
+                                    agent_task.cancel()
+                                    try:
+                                        await agent_task
+                                    except asyncio.CancelledError:
+                                        pass
+                                    return []
+                                
+                                await asyncio.sleep(0.5)
+                            
+                            history = await agent_task
                             
                             raw = history.final_result() or ""
                             
@@ -203,6 +230,7 @@ class GoogleResearcherAgent:
                                         # Basic domain check
                                         if any(d in url for d in self.ats_domains):
                                             # HTTP Verification (Head Request)
+                                            # Also check cancellation before verification?
                                             if await self._verify_url(url):
                                                 query_leads.append({**j, 'is_direct_listing': True, 'query_source': query})
                                             else:
@@ -213,6 +241,9 @@ class GoogleResearcherAgent:
                            if hasattr(browser, 'close'):
                                await browser.close()
 
+                    except asyncio.CancelledError:
+                         # Re-raise to stop parent gather
+                         raise
                     except Exception as e:
                         print(f"   ❌ Error on {query}: {e}")
                     
