@@ -237,6 +237,9 @@ async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, a
         supabase_service.save_chat_message(session_id, "model", f"🚀 Starting Application to **{job_url}**...")
         await log(f"Initializing application agent for: {job_url}")
 
+    # Resolve User ID early for dispatch
+    user_id = user_profile.get("user_id") or user_profile.get("id")
+
     # Cloud Dispatch Check
     cloud_url = os.getenv("CLOUD_RUN_URL")
     # Only dispatch if we are not ALREADY in the cloud worker (prevent infinite loop if env vars are confusing)
@@ -250,6 +253,7 @@ async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, a
             async with httpx.AsyncClient() as client:
                 payload = {
                     "type": "apply",
+                    "user_id": user_id,
                     "job_url": job_url,
                     "resume_path": resume_path, # Note: This path is local, we might need to handle this differently for cloud. 
                     # actually worker endpoint logic below handles download. We pass resume_filename instead of path if possible?
@@ -286,7 +290,7 @@ async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, a
         return "FAILED_DISPATCH"
 
     # Resolve Lead ID for status updates
-    user_id = user_profile.get("user_id") or user_profile.get("id")
+    # user_id already resolved above
     
     lead_id = None
     if user_id:

@@ -152,6 +152,7 @@ async def handle_agent_action(action, user_id, session_id, available_resumes, cu
             profile_blob = user_data.get('profile_data', {})
             if 'email' not in profile_blob: profile_blob['email'] = current_user['email']
             if 'full_name' not in profile_blob and user_data.get('full_name'): profile_blob['full_name'] = user_data.get('full_name')
+            if 'user_id' not in profile_blob: profile_blob['user_id'] = user_id
             
             if extra_instructions:
                 profile_blob['apply_instructions'] = extra_instructions

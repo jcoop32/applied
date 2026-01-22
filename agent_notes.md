@@ -90,4 +90,10 @@
 
 ## Internal Issue: Switch to Real-time Job Updates
 **Context:** Job search status updates were previously polling every 3 seconds, delaying results and causing duplicate fetching.
-**Solution:** Refactored `script.js` to utilize the existing Supabase Realtime subscription on the `profiles` table. The frontend now tracks `lastResearchStatus` and triggers `handleResearchCompletion()` immediately when the status transitions to "COMPLETED". Removed `pollResearchStatus` entirely. This reduces network load and provides instant feedback.
+**Solution:** Refactored `script.js` to utilize the existing Supabase Realtime subscription on the `profiles` table. The frontend now tracks `lastResearchStatus` and triggers `handleResearchCompletion()` immediately when the status transitions to "COMPLETED". Removed `pollResearchStatus` entirely. 
+## User Report: 2026-01-21 (Cloud Run Applier)
+**Error:** `Supabase Download Error` / `Worker Warning: no user_id found for resume download`.
+**Root Cause:** The `user_id` was not being passed in the "apply" task payload to the Cloud Worker. The worker relies on `user_id` to construct the resume storage path (`{user_id}/{filename}`). The `payload.user_id` was None, and extraction from `user_profile` failed because `chat.py` wasn't injecting `user_id` into the profile blob sent to the worker.
+**Fix Strategy:**
+1.  **Inject User ID:** Updated `app/api/chat.py` to explicitly add `user_id` to the `profile_blob` before passing it to `agent_runner`.
+2.  **Payload Update:** Updated `app/services/agent_runner.py` to extract `user_id` early and include it as a top-level field in the Cloud Run dispatch payload.
