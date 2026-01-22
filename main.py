@@ -48,6 +48,11 @@ async def login_page():
 async def index_page():
     return FileResponse(os.path.join(static_dir, "index.html"))
 
+# Explicit route for Chat Sessions
+@app.get("/chat/{session_id}")
+async def chat_session_page(session_id: str):
+    return FileResponse(os.path.join(static_dir, "index.html"))
+
 # Explicit route for Profile
 @app.get("/profile")
 async def profile_page():

@@ -43,6 +43,27 @@ document.addEventListener("DOMContentLoaded", () => {
 const API_BASE = "/api";
 let currentUser = null;
 let lastResearchStatus = {}; // Cache to track transitions
+let pollingInterval = null;
+
+function startPollingFallback() {
+    if (pollingInterval) return;
+    console.warn("⚠️ Switching to 5s Polling Fallback for Status Updates.");
+
+    pollingInterval = setInterval(async () => {
+        try {
+            // Re-fetch profile to get status
+            // This also implicitly checks auth/token validity via authFetch
+            const res = await authFetch(`${API_BASE}/profile`);
+            if (res.ok) {
+                const data = await res.json();
+                updateResearchUI(data);
+            }
+        } catch (e) {
+            console.error("Polling error", e);
+        }
+    }, 5000);
+}
+
 
 // Helper: Authenticated Fetch
 async function authFetch(url, options = {}) {
@@ -95,19 +116,39 @@ function initChatPage() {
     const newChatBtn = document.getElementById("new-chat-btn");
 
     // Load Sessions, then restore last active session
+    // Load Sessions, then restore last active session
     loadSessions().then(() => {
-        // Check URL first
+        // Check URL Logic (Deep Linking)
+        const path = window.location.pathname;
         const urlParams = new URLSearchParams(window.location.search);
-        const urlSessionId = urlParams.get('session_id');
 
-        if (urlSessionId) {
-            loadSession(urlSessionId);
-            // Clean URL
-            window.history.replaceState({}, document.title, "/");
+        let targetSessionId = null;
+
+        // Priority 1: Path /chat/{id}
+        const pathMatch = path.match(/^\/chat\/([a-zA-Z0-9-]+)/);
+        if (pathMatch && pathMatch[1]) {
+            targetSessionId = pathMatch[1];
+        }
+        // Priority 2: Query Param ?session_id={id} (Legacy Support)
+        else {
+            const queryId = urlParams.get('session_id');
+            if (queryId) {
+                targetSessionId = queryId;
+                // Upgrade to path URL immediately
+                window.history.replaceState({}, document.title, `/chat/${targetSessionId}`);
+            }
+        }
+
+        if (targetSessionId) {
+            loadSession(targetSessionId);
         } else {
-            const savedSessionId = localStorage.getItem('currentChatSessionId');
-            if (savedSessionId) {
-                loadSession(savedSessionId);
+            // Restore last session if on root
+            // Only if we are strictly on "/" to avoid hijacking "New Chat" intent if we had a /chat/new route (we don't yet)
+            if (path === "/") {
+                const savedSessionId = localStorage.getItem('currentChatSessionId');
+                if (savedSessionId) {
+                    loadSession(savedSessionId);
+                }
             }
         }
     });
@@ -354,6 +395,9 @@ async function startNewChat() {
     currentSessionId = null;
     localStorage.removeItem('currentChatSessionId');
 
+    // Reset URL to Root
+    window.history.pushState({}, document.title, "/");
+
     const container = document.getElementById("messages-container");
     if (container) {
         container.innerHTML = "";
@@ -378,6 +422,11 @@ async function startNewChat() {
 async function loadSession(sessionId) {
     currentSessionId = sessionId;
     localStorage.setItem('currentChatSessionId', sessionId);
+
+    // Update URL state (Deep Link)
+    if (window.location.pathname !== `/chat/${sessionId}`) {
+        window.history.pushState({}, document.title, `/chat/${sessionId}`);
+    }
     const container = document.getElementById("messages-container");
     if (!container) return;
     container.innerHTML = ""; // Clear current
@@ -645,6 +694,10 @@ async function sendMessage() {
                         if (!currentSessionId && data.session_id) {
                             currentSessionId = data.session_id;
                             localStorage.setItem('currentChatSessionId', data.session_id);
+
+                            // UPDATE URL (Deep Link)
+                            window.history.pushState({}, document.title, `/chat/${currentSessionId}`);
+
                             loadSessions();
                         }
                     }
@@ -809,10 +862,17 @@ async function initRealtime() {
                     console.log(`🔌 Channel 'public:profiles' status: ${status}`);
                     if (status === 'SUBSCRIBED') {
                         // showLogInternal("Real-time updates active.", "success");
-                    } else if (status === 'CHANNEL_ERROR') {
-                        console.error("❌ Realtime Channel Error - Check RLS Policies or Token Validity");
+                        if (pollingInterval) {
+                            clearInterval(pollingInterval);
+                            pollingInterval = null;
+                            console.log("🔌 WebSocket recovered. Stopping polling.");
+                        }
+                    } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+                        console.error(`❌ Realtime Channel Error (${status}) - Switching to Polling`);
+                        startPollingFallback();
                     }
                 });
+
 
             // Subscribe to Leads (New Jobs)
             // Note: RLS might prevent receiving events if row-level security is strict on real-time
@@ -1100,15 +1160,13 @@ async function confirmSearch() {
 
         if (res.ok) {
             const data = await res.json();
-            // Force UI update to show searching state (redundant but safe)
-            checkResearcherVisibility();
-
             if (data.session_id) {
                 // We rely on updateResearchUI now, so we might not need this if the status container does the job.
                 // But let's keep it if it adds a specific "Cancel" message block?
                 // Actually the user wants the cancel button INLINE.
                 // updateResearchUI handles the status box.
             }
+
         } else {
             console.error("Research start failed", await res.text());
             addMessage("model", "❌ Failed to start research.");

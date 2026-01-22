@@ -277,8 +277,7 @@ async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, a
 
     # Cloud Dispatch Check
     cloud_url = os.getenv("CLOUD_RUN_URL")
-    # Only dispatch if we are not ALREADY in the cloud worker (prevent infinite loop if env vars are confusing)
-    # But user_profile needs to be passed carefully.
+    # Only dispatch if we are not ALREADY in the cloud worker AND execution_mode is 'cloud_run'
     if allow_dispatch and cloud_url and not os.getenv("IS_CLOUD_WORKER") and execution_mode == 'cloud_run':
         import httpx
         print(f"🚀 Dispatching Applier task to Cloud Worker: {cloud_url}")
@@ -290,30 +289,32 @@ async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, a
                     "type": "apply",
                     "user_id": user_id,
                     "job_url": job_url,
-                    "resume_path": resume_path, # Note: This path is local, we might need to handle this differently for cloud. 
-                    # actually worker endpoint logic below handles download. We pass resume_filename instead of path if possible?
-                    # The worker needs to re-download. So we should pass resume_filename and user_id in payload, NOT local path.
+                    # We pass resume_filename so worker downloads from Supabase
+                    "resume_filename": resume_filename,
                     "user_profile": user_profile,
                     "api_key": api_key,
-                    "resume_filename": resume_filename,
-                    "execution_mode": "local", # Worker runs it as local relative to itself (headless default), UNLESS we want worker to use managed?
-                    # Actually if user wants Cloud Run + Managed Browser, we don't support that combo yet in UI.
-                    # UI has "Google Cloud Run" (self-hosted) OR "Browser Use Cloud" (managed).
-                    # "Google Cloud Run" implies self-hosted headless.
+                    "execution_mode": "local", # Worker runs it locally relative to itself
                     "session_id": session_id,
                     "instructions": instructions
                 }
                 headers = {"x-worker-secret": os.getenv("WORKER_SECRET", "")}
-                # Increase timeout to 5 minutes to allow for full execution or at least long enough for initial steps
+                
+                # TIMEOUT FIX: Increase to 300s (5 min) matches Cloud Run max
                 resp = await client.post(f"{cloud_url}/api/worker/task", json=payload, headers=headers, timeout=300.0)
+                
                 if resp.status_code != 200:
                     print(f"❌ Cloud Dispatch Failed: {resp.text}")
-                    # If user explicitly asked for Cloud, we should probably stop or notify rather than silently running local
-                    # But for robustness, we can return Error status
                     await log(f"❌ Cloud Execution Failed (Status {resp.status_code}). Check Cloud Run logs.", type="error")
                     return "FAILED_DISPATCH"
                 else:
-                    return # Successfully dispatched
+                    return {"status": "Dispatched", "worker": cloud_url}
+
+        except httpx.ReadTimeout:
+             # If it times out, it likely IS running on cloud, just taking long.
+             print("⏳ Cloud Dispatch timed out waiting for response (Task likely running).")
+             await log("Task dispatched to cloud (running in background)...", type="log")
+             return {"status": "Dispatched", "worker": cloud_url, "timeout": True}
+             
         except Exception as e:
              print(f"❌ Cloud Dispatch Error: {traceback.format_exc()}")
              await log(f"❌ Cloud Dispatch Error: {e}", type="error")

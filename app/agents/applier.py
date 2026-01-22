@@ -371,6 +371,12 @@ class ApplierAgent:
            - **WAIT 5 SECONDS** for full load.
            - Calls `update_status("Analyzying Page")`.
 
+        2. **School / University Selection (CRITICAL)**:
+           - When asked for University/School, search for: **"Illinois Institute of Technology"**.
+           - **DO NOT** select "IIT" or other abbreviations unless they match exactly.
+           - If it's a dropdown, type "Illinois Inst" and wait for the autocomplete.
+
+
         2. **Quick Apply Check & T&C (CRITICAL)**:
            - Look for "Apply", "Apply Now", "Start Application".
            - **CRITICAL**: CHECK FOR AND CLICK 'I Agree', 'Terms of Service', 'Consent', or 'Privacy Policy' CHECKBOXES. 
@@ -408,7 +414,11 @@ class ApplierAgent:
            - **Inputs**:
              - **Text**: Fill with Profile data.
              - **Dropdowns**: FOLLOW STRICT RULE ABOVE (Click -> Type -> Wait -> ArrowDown -> Enter).
-             - **Phone Number**: Select Country Code first if separate.
+             - **Phone Number**: 
+               - **IMPORTANT**: Click the input field first.
+               - If there is a separate country code dropdown, select **"+1 (United States)"** BEFORE typing the number.
+               - Enter number: `{profile.get('phone')}`
+
            - **Mapping**:
              - "Desired Salary" -> `{profile.get('salary_expectations', 'Negotiable')}`
              - "Start Date" -> 2 weeks from today.
@@ -418,8 +428,11 @@ class ApplierAgent:
         7. **Submission & Validation**:
            - **LOOP (Max 3 attempts)**:
              1. **Hover** over "Submit"/"Apply" for 1s.
-             2. **CRITICAL PRE-SUBMIT CHECK**: Scour the page for "I Agree" / "Terms" checkboxes again. Click them if unchecked.
+             2. **CRITICAL PRE-SUBMIT CHECK**: 
+                - Review the form for empty mandatory fields (marked with *).
+                - Scour the page for "I Agree" / "Terms" checkboxes again. Click them if unchecked.
              3. Click "Submit".
+
              4. **WAIT 3 SECONDS**.
              5. **SCAN FOR ERRORS**: Look for red text, "Required field", or "Invalid".
              6. **IF ERRORS**: **FIX THEM**. Focus on the empty required fields. REPEAT.

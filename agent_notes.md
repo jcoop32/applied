@@ -117,3 +117,16 @@
 1. **Pass Token:** Update `script.js` to pass the stored JWT `token` in `createClient` options (`accessToken` or `global.headers`).
 2. **Verify Secret:** Ensure the backend `SECRET_KEY` matches Supabase's JWT Secret so the token is accepted.
 3. **Debug Config:** Add logging in `script.js` to verify `supabase_url` and `key` are loaded correctly.
+
+## User Report: 2026-01-22 (Syntax Error)
+**Error:** `SyntaxError: Identifier 'currentUser' has already been declared` in `static/script.js`.
+**Root Cause:** A `multi_replace_file_content` operation aimed at adding polling logic accidentally duplicated the existing `let currentUser = null;` line due to an overlapping replacement range.
+**Fix Strategy:** Removed the duplicate declaration line.
+
+## User Report: 2026-01-22 (Browser Interaction Failure)
+**Error:** `BrowserError: Failed to click element: ... Node with given id does not belong to the document`.
+**Root Cause:** The `GoogleResearcherAgent` was attempting to interact with the search page (Brave Search) before the DOM was fully stable. The default `browser-use` wait times (likely 4.0s or less) were insufficient for the cloud environment, leading to stale element references and click failures.
+**Fix Strategy:**
+1. Increased `wait_for_network_idle_page_load_time` to 6.0s (from 4.0s).
+2. Increased `minimum_wait_page_load_time` to 3.0s (from 2.0s).
+3. Added `--disable-popup-blocking` and `--disable-notifications` to browser launch arguments to reduce interference.
