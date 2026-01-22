@@ -32,3 +32,11 @@
 **Context:** During the implementation of error handling for Cloud Run resilience, `app/api/chat.py` was modified to wrap `handle_agent_action` in a `try` block, but the `except` block was inadvertently omitted or overwritten during a multi-step edit.
 **Root Cause:** A tool call to `replace_file_content` updated the beginning of the function but failed to correctly append the necessary `except` block at the end, leaving an open `try` block.
 **Solution:** Rewrote the entire `handle_agent_action` function using a single `replace_file_content` call to ensure the complete `try/except` structure was correctly applied with proper indentation.
+
+## User Report: 2026-01-21
+**Error:** Cloud Dispatch Error (empty message) / Cloud Worker failing silently.
+**Root Cause:** The Gemini 2.5 Flash model in `GoogleResearcherAgent` exceeded the default output token limit (generating >8000 tokens), causing a `FinishReason.MAX_TOKENS` truncation. The resulting truncated JSON caused an `Unterminated string` error during parsing. The backend logging in `agent_runner.py` only printed `str(e)`, which was empty for some exceptions, masking the root cause.
+**Fix Strategy:**
+1.  **Optimized Prompt:** Updated `GoogleResearcherAgent` prompt to strictly forbid reasoning/markdown blocks and enforce conciseness ("Snippets must be under 20 words").
+2.  **Increased Token Limit:** Updated `ChatGoogle` init to set `max_output_tokens` to 8192 as a safety buffer.
+3.  **Improved Logging:** Updated `agent_runner.py` to use `traceback.format_exc()` for full error visibility.

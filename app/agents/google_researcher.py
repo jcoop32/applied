@@ -14,7 +14,7 @@ class GoogleResearcherAgent:
         self.client = genai.Client(api_key=api_key)
         self.api_key = api_key
         self.model_id = 'gemini-2.5-flash'
-        self.llm = ChatGoogle(model='gemini-2.5-flash', api_key=api_key)
+        self.llm = ChatGoogle(model='gemini-2.5-flash', api_key=api_key, generation_config={"max_output_tokens": 8192})
         self.seen_jobs: Set[str] = set()
         
         # Valid ATS Domains to target for "Verified" jobs
@@ -152,12 +152,14 @@ class GoogleResearcherAgent:
                         # We instruct the agent to use Brave Search
                         task_prompt = (
                             f"Go to {url} . "
-                            f"Extract the TOP 5 search results. "
+                            f"Extract the TOP 5 search results directly into JSON. "
                             f"For each result, try to parse the 'Company' from the title or URL. "
                             f"CRITICAL: Extract the EXACT 'href' from the link (anchor tag) of the search result. "
                             f"Do NOT guess or reconstruct the URL from the visible text. "
                             f"Return a strict JSON object: {{'jobs': [{{'title': '...', 'company': '...', 'url': '...', 'snippet': '...'}}]}}. "
-                            f"Keep snippets short (max 20 words). "
+                            f"Constraint: Snippets must be under 20 words. No HTML. "
+                            f"Constraint: NO Reasoning, NO Thoughts, NO Markdown blocks outside JSON. "
+                            f"Constraint: Return ONLY valid JSON. "
                             f"If the page loads, extract jobs. Ignore 'page readiness' warnings if content is visible."
                         )
                         

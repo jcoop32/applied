@@ -5,6 +5,7 @@ import logging
 import asyncio
 from app.services.supabase_client import supabase_service
 from app.services.log_stream import log_stream_manager
+import traceback
 
 from app.agents.google_researcher import GoogleResearcherAgent
 from app.agents.matcher import MatcherAgent
@@ -72,7 +73,7 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
                 else:
                     return # Successfully dispatched
         except Exception as e:
-             print(f"❌ Cloud Dispatch Error: {e}")
+             print(f"❌ Cloud Dispatch Error: {traceback.format_exc()}")
              if session_id: await log_stream_manager.broadcast(str(session_id), f"Cloud dispatch error: {e}, running locally...", type="warning")
 
     update_research_status(user_id, resume_filename, "SEARCHING")
@@ -233,7 +234,7 @@ async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, a
                 else:
                     return # Successfully dispatched
         except Exception as e:
-             print(f"❌ Cloud Dispatch Error: {e}")
+             print(f"❌ Cloud Dispatch Error: {traceback.format_exc()}")
 
     # Resolve Lead ID for status updates
     user_id = user_profile.get("user_id") or user_profile.get("id")
