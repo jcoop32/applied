@@ -221,8 +221,8 @@ class GoogleResearcherAgent:
                          disable_security=True,
                          args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-popup-blocking", "--disable-notifications"],
                          user_agent=browser_user_agent,
-                         wait_for_network_idle_page_load_time=6.0,
-                         minimum_wait_page_load_time=3.0 
+                         wait_for_network_idle_page_load_time=10.0,
+                         minimum_wait_page_load_time=5.0 
                      )
                      
                      try:

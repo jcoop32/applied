@@ -407,6 +407,12 @@ class ApplierAgent:
              - **Scan the DOM** for `<input type="file">`.
              - **ACTION**: Use the browser's `upload_file(path="{safe_resume_path}")` action targeting that input.
              - **CRITICAL**: DO NOT click the "Upload Resume" button if it opens a system dialog. You MUST target the `input` element directly.
+             - **VERIFICATION**:
+               - After uploading, **WAIT 3 SECONDS**.
+               - Look for success indicators (e.g. filename visible, "Uploaded") OR failure messages ("File too large", "Failed to upload", "Invalid format").
+               - **IF FAILURE DETECTED**:
+                 - **STOP IMMEDIATELY**.
+                 - **RETURN FAILURE JSON**: `{{ "status": "FAILED", "reason": "Resume upload failed: <error message found>" }}`
 
         6. **Form Filling (Comprehensive)**:
            - Calls `update_status("Filling Form")`.

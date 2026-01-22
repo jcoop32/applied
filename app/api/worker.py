@@ -24,7 +24,8 @@ class TaskPayload(BaseModel):
     job_url: Optional[str] = None
     resume_path: Optional[str] = None # Ignored in favor of redownloading
     user_profile: Optional[Dict[str, Any]] = None
-    use_cloud: bool = False
+    use_cloud: bool = False # Deprecated, use execution_mode
+    execution_mode: Optional[str] = "local" # local, browser_use_cloud
     instructions: Optional[str] = None
 
 @router.post("/task")
@@ -117,7 +118,8 @@ async def handle_worker_task(
                  user_profile=payload.user_profile,
                  api_key=payload.api_key,
                  resume_filename=payload.resume_filename,
-                 use_cloud=payload.use_cloud,
+                 # Priority: use payload.execution_mode if set, else fallback to use_cloud flag check
+                 execution_mode=payload.execution_mode if payload.execution_mode != "local" else ("browser_use_cloud" if payload.use_cloud else "local"),
                  session_id=payload.session_id,
                  instructions=payload.instructions,
                  allow_dispatch=False

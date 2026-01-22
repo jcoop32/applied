@@ -277,11 +277,13 @@ async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, a
 
     # Cloud Dispatch Check
     cloud_url = os.getenv("CLOUD_RUN_URL")
-    # Only dispatch if we are not ALREADY in the cloud worker AND execution_mode is 'cloud_run'
-    if allow_dispatch and cloud_url and not os.getenv("IS_CLOUD_WORKER") and execution_mode == 'cloud_run':
+    # Only dispatch if we are not ALREADY in the cloud worker AND execution_mode indicates a cloud/managed environment
+    should_dispatch = execution_mode in ['cloud_run', 'browser_use_cloud', 'browser_use']
+    
+    if allow_dispatch and cloud_url and not os.getenv("IS_CLOUD_WORKER") and should_dispatch:
         import httpx
-        print(f"🚀 Dispatching Applier task to Cloud Worker: {cloud_url}")
-        await log("Dispatching Applier to Cloud Worker...")
+        print(f"🚀 Dispatching Applier task to Cloud Worker: {cloud_url} (Mode: {execution_mode})")
+        await log(f"Dispatching Applier to Cloud Worker ({execution_mode})...")
         
         try:
             async with httpx.AsyncClient() as client:
@@ -293,7 +295,7 @@ async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, a
                     "resume_filename": resume_filename,
                     "user_profile": user_profile,
                     "api_key": api_key,
-                    "execution_mode": "local", # Worker runs it locally relative to itself
+                    "execution_mode": execution_mode, # Pass the requested mode to the worker
                     "session_id": session_id,
                     "instructions": instructions
                 }
@@ -305,7 +307,8 @@ async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, a
                 if resp.status_code != 200:
                     print(f"❌ Cloud Dispatch Failed: {resp.text}")
                     await log(f"❌ Cloud Execution Failed (Status {resp.status_code}). Check Cloud Run logs.", type="error")
-                    return "FAILED_DISPATCH"
+                    # CRITICAL: DO NOT FALLBACK TO LOCAL if cloud was requested
+                    return f"FAILED_DISPATCH: Cloud Worker returned {resp.status_code}"
                 else:
                     return {"status": "Dispatched", "worker": cloud_url}
 
@@ -318,12 +321,16 @@ async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, a
         except Exception as e:
              print(f"❌ Cloud Dispatch Error: {traceback.format_exc()}")
              await log(f"❌ Cloud Dispatch Error: {e}", type="error")
-             return "FAILED_DISPATCH"
+             # CRITICAL: DO NOT FALLBACK TO LOCAL
+             return f"FAILED_DISPATCH: {e}"
 
-    # If we are here, we are running LOCALLY (or we are the worker)
-    if execution_mode == 'cloud_run':
-        # If we were supposed to be Cloud Run but fell through (unlikely with above returns), stop.
-        return "FAILED_DISPATCH"
+    # If we are here, we are running LOCALLY (or we are the worker, or mode is 'local')
+    if execution_mode in ['cloud_run', 'browser_use_cloud'] and not os.getenv("IS_CLOUD_WORKER"):
+         # If we somehow fell through here but wanted cloud, STOP.
+         # This handles case where cloud_url is missing
+         print(f"🛑 Execution Mode '{execution_mode}' requested but Cloud Dispatch failed or not configured.")
+         await log("❌ Failed to dispatch to cloud (configuration/network error). Stopping to avoid local execution.", type="error")
+         return "FAILED_DISPATCH_NO_FALLBACK"
 
     # Resolve Lead ID for status updates
     # user_id already resolved above
