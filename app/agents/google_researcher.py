@@ -238,8 +238,8 @@ class GoogleResearcherAgent:
 
     async def _verify_url(self, url: str) -> bool:
         """
-        Verifies if a URL is valid and accessible (200 OK).
-        Follows redirects.
+        Verifies if a URL is valid and accessible (200 OK) AND looks like an open job.
+        Uses a lightweight HTML snippet check + LLM to detect "Job Closed" banners.
         """
         import requests
         try:
@@ -248,19 +248,65 @@ class GoogleResearcherAgent:
                 headers = {
                     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
                 }
-                # Use GET with stream=True to avoid downloading large content
-                response = requests.get(url, headers=headers, timeout=5, allow_redirects=True, stream=True)
-                # Check for 404 or 500
-                if response.status_code >= 400:
-                    return False
-                # Double check: sometimes Greenhouse redirects to a generic error page with 200 OK?
-                # e.g. https://job-boards.greenhouse.io/nvidia?error=true was found by the subagent earlier.
-                # However, usually redirects return 3xx which requests handles.
-                # If we landed on a URL containing "error", it's bad.
-                if "error" in response.url.lower() or "not found" in response.url.lower():
-                    return False
-                return True
+                
+                # 1. Fetch First 15KB Only (BLOCKING IO in Thread)
+                try:
+                    # stream=True allows us to read only a chunk
+                    with requests.get(url, headers=headers, timeout=5, allow_redirects=True, stream=True) as response:
+                        if response.status_code >= 400:
+                            return False
+                        
+                        # Read first 15KB
+                        chunk = next(response.iter_content(chunk_size=15000), b"")
+                        html_snippet = chunk.decode('utf-8', errors='ignore')
+                        
+                        # Basic URL Check
+                        if "error" in response.url.lower() or "not found" in response.url.lower():
+                            return False
 
+                except Exception as req_e:
+                    # Connection failed completely
+                    return False
+
+                # 2. Fast LLM Check (Gemini Flash)
+                # We ask if the job is OPEN based on the snippet
+                snippet_prompt = f"""
+                Analyze this HTML snippet from a job board.
+                Is this job OPEN and accepting applications? 
+                
+                Return FALSE if:
+                - It says "Job Closed", "Position Filled", "No longer accepting applications".
+                - It is a generic login page not specific to a job.
+                - It is a 404 block.
+
+                HTML Snippet:
+                {html_snippet[:10000]}
+
+                Return JSON: {{ "is_valid_job": boolean }}
+                """
+                
+                try:
+                    # Synchronous Multimodal Call (Safe inside this to_thread wrapper)
+                    response = self.client.models.generate_content(
+                        model='gemini-2.5-flash',
+                        contents=snippet_prompt,
+                        config={
+                             'response_mime_type': 'application/json',
+                             'response_schema': {"type": "OBJECT", "properties": {"is_valid_job": {"type": "BOOLEAN"}}}
+                        }
+                    )
+                    data = json.loads(response.text)
+                    return data.get("is_valid_job", False)
+                
+                except Exception as llm_e:
+                    print(f"⚠️ Verification LLM failed: {llm_e}")
+                    # Fallback to simple keyword check
+                    lower_html = html_snippet.lower()
+                    if "closed" in lower_html or "filled" in lower_html:
+                        return False
+                    return True
+
+            # CRITICAL: Wrap strict blocking IO and Sync LLM call in a thread
             return await asyncio.to_thread(check)
         except Exception:
             return False

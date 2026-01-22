@@ -10,6 +10,8 @@ BUCKET_NAME = "resumes"
 
 import time
 
+from functools import lru_cache
+
 class SupabaseService:
     def __init__(self):
         if not SUPABASE_URL or not SUPABASE_KEY:
@@ -113,9 +115,11 @@ class SupabaseService:
             print(f"❌ Supabase List Error: {e}")
             return []
 
+    @lru_cache(maxsize=128)
     def get_credentials(self, email: str):
         """
         Fetches credentials for a specific email from the 'credentials' table.
+        Cached.
         """
         if not self.client:
             print("⚠️ Supabase client not initialized.")
@@ -167,9 +171,11 @@ class SupabaseService:
             print(f"❌ Supabase User Fetch Error: {e}")
             return None
 
+    @lru_cache(maxsize=128)
     def get_user_profile(self, user_id: int):
         """
         Fetches the user's profile from the 'profiles' table.
+        Cached.
         """
         if not self.client:
             return None
@@ -218,6 +224,13 @@ class SupabaseService:
             print(f"❌ Supabase User Create Error: {e}")
             raise e
 
+    def clear_user_cache(self, user_id: int):
+        """
+        Clears the LRU cache for user profile and credentials (best effort).
+        """
+        self.get_user_profile.cache_clear()
+        self.get_credentials.cache_clear()
+
     def update_user_profile(self, user_id: int, data: dict):
         """
         Updates the user's profile data in the 'profiles' table.
@@ -229,6 +242,8 @@ class SupabaseService:
             # ensure data only contains profile fields
             response = self.client.table("profiles").update(data).eq("user_id", user_id).execute()
             if response.data:
+                # Clear cache on update
+                self.clear_user_cache(user_id)
                 return response.data[0]
             return None
         except Exception as e:

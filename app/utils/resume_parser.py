@@ -11,6 +11,10 @@ class ResumeParser:
         with open(pdf_path, "rb") as f:
             pdf_bytes = f.read()
 
+        # 1.5. Calculate Today's Date for Context
+        from datetime import datetime
+        today_str = datetime.now().strftime("%B %d, %Y")
+
         # 2. Define the Schema (Same as before, but critical for consistency)
         manual_schema = {
             "type": "OBJECT",
@@ -21,6 +25,11 @@ class ResumeParser:
                 "linkedin": {"type": "STRING", "description": "LinkedIn profile URL"},
                 "website": {"type": "STRING", "description": "Personal website or portfolio URL"},
                 "location": {"type": "STRING"},
+                "calculated_target_level": {
+                    "type": "STRING",
+                    "enum": ["Internship", "New Grad", "Junior", "Mid-Level", "Senior"],
+                    "description": "Calculated based on graduation date relative to today."
+                },
                 "skills": {"type": "ARRAY", "items": {"type": "STRING"}},
                 "summary": {"type": "STRING"},
                 "work_experience": {
@@ -52,8 +61,20 @@ class ResumeParser:
 
         # 3. Optimized Prompt
         # We ask it to use visual layout cues (columns, bold text) to parse correctly.
-        prompt = """
+        prompt = f"""
         Analyze this resume document visually. Extract all information into the specified JSON format.
+        
+        CONTEXT:
+        - Today's Date is: {today_str}
+        
+        Target Level Logic (calculated_target_level):
+        - If the candidate's education 'End Date' is in the FUTURE relative to today (e.g., Graduation 2026/2027), or if they are currently a student -> "Internship"
+        - If graduation date was within the last 12 months -> "New Grad"
+        - If graduation date was 1-3 years ago -> "Junior"
+        - If graduation date was 3-5 years ago -> "Mid-Level"
+        - If graduation date was 5+ years ago -> "Senior"
+        
+        CRITICAL: Prioritize "Internship" or "Co-op" availability over current job title logic if they are still in school.
 
         Guidelines:
         - If the resume has multiple columns, read them logically.

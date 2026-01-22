@@ -353,7 +353,18 @@ class ApplierAgent:
 
 {user_instructions_block}
 
-        **INSTRUCTIONS**:
+         **STRICT INTERACTION RULES**:
+            - **Dropdowns**: 
+              1. Click the dropdown element.
+              2. Type 2-3 characters of the target value.
+              3. **WAIT 1 SECOND**.
+              4. Press 'ArrowDown'.
+              5. Press 'Enter'.
+              - **DO NOT** just type text into the container without selecting.
+            - **Authentication**:
+              - After clicking "Create Account" or "Sign In", **WAIT 10 SECONDS** before attempting to fill any new form fields.
+
+         **INSTRUCTIONS**:
 
         1. **Navigate & Load**:
            - Navigate to: {resolved_url}
@@ -396,7 +407,7 @@ class ApplierAgent:
            - **RULE**: Fill **ALL** visible fields. Do not skip any unless explicitly marked "Optional" AND you have no data for it.
            - **Inputs**:
              - **Text**: Fill with Profile data.
-             - **Dropdowns**: Click, Type 2-3 chars, **WAIT** for options, then **Click** the best match.
+             - **Dropdowns**: FOLLOW STRICT RULE ABOVE (Click -> Type -> Wait -> ArrowDown -> Enter).
              - **Phone Number**: Select Country Code first if separate.
            - **Mapping**:
              - "Desired Salary" -> `{profile.get('salary_expectations', 'Negotiable')}`
