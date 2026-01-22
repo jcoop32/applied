@@ -27,3 +27,8 @@
 **Context:** Supabase client initialization logged a warning about the storage URL format.
 **Root Cause:** The `supabase-py` storage client might warn if the URL format isn't perfect, but previous attempts to manually append a slash `url += "/"` **caused** this warning or a double-slash issue in some versions.
 **Solution:** Removed the manual slash appending. Passing `SUPABASE_URL` as-is (without trailing slash) resolves the warning in this environment. Verified that `list` and `get_public_url` work correctly without the manual slash.
+
+## Issue: SyntaxError 'expected except or finally block' in chat.py
+**Context:** During the implementation of error handling for Cloud Run resilience, `app/api/chat.py` was modified to wrap `handle_agent_action` in a `try` block, but the `except` block was inadvertently omitted or overwritten during a multi-step edit.
+**Root Cause:** A tool call to `replace_file_content` updated the beginning of the function but failed to correctly append the necessary `except` block at the end, leaving an open `try` block.
+**Solution:** Rewrote the entire `handle_agent_action` function using a single `replace_file_content` call to ensure the complete `try/except` structure was correctly applied with proper indentation.

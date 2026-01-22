@@ -71,40 +71,52 @@ async def handle_agent_action(action, user_id, session_id, available_resumes, cu
     """
     extra_response = ""
     
-    if action["type"] == "research":
-        args = action["payload"]
-        resume_filename = args.get("resume_filename")
-        limit = int(args.get("limit", 20))
-        job_title = args.get("job_title_override")
-        location = args.get("location_override")
-        
-        if resume_filename not in available_resumes:
-           pass # logging handled in agent text usually
-
+    
     try:
         if action["type"] == "research":
-        from app.services.github import dispatch_github_action
-        
-        update_research_status(user_id, resume_filename, "SEARCHING")
-        use_gha = os.getenv("USE_GITHUB_ACTIONS", "false").lower() == "true"
-        
-        if use_gha:
-            print(f"🚀 Dispatching Research via GitHub Actions for {resume_filename}")
-            payload = {
-                "user_id": user_id,
-                "resume_filename": resume_filename,
-                "limit": limit,
-                "job_title": job_title,
-                "location": location,
-                "session_id": session_id
-            }
-            success = await dispatch_github_action("research_agent.yml", "research", payload)
+            args = action["payload"]
+            resume_filename = args.get("resume_filename")
+            limit = int(args.get("limit", 20))
+            job_title = args.get("job_title_override")
+            location = args.get("location_override")
             
-            if success:
-                supabase_service.save_chat_message(session_id, "model", f"🚀 Research agent dispatched to cloud runner for **{resume_filename}**. You will see results here shortly.")
+            if resume_filename not in available_resumes:
+               pass # logging handled in agent text usually
+
+            from app.services.agent_runner import run_research_pipeline, update_research_status
+            from app.services.github import dispatch_github_action
+            
+            update_research_status(user_id, resume_filename, "SEARCHING")
+            use_gha = os.getenv("USE_GITHUB_ACTIONS", "false").lower() == "true"
+            
+            if use_gha:
+                print(f"🚀 Dispatching Research via GitHub Actions for {resume_filename}")
+                payload = {
+                    "user_id": user_id,
+                    "resume_filename": resume_filename,
+                    "limit": limit,
+                    "job_title": job_title,
+                    "location": location,
+                    "session_id": session_id
+                }
+                success = await dispatch_github_action("research_agent.yml", "research", payload)
+                
+                if success:
+                    supabase_service.save_chat_message(session_id, "model", f"🚀 Research agent dispatched to cloud runner for **{resume_filename}**. You will see results here shortly.")
+                else:
+                    extra_response = "\n\n(⚠️ Failed to start Cloud Agent. Falling back to local runner...)"
+                    # Fallback to local
+                    asyncio.create_task(run_research_pipeline(
+                        user_id=user_id,
+                        resume_filename=resume_filename,
+                        api_key=api_key,
+                        limit=limit,
+                        job_title=job_title,
+                        location=location,
+                        session_id=session_id
+                    ))
             else:
-                extra_response = "\n\n(⚠️ Failed to start Cloud Agent. Falling back to local runner...)"
-                # Fallback to local
+                # Local or Cloud Dispatch (logic handled inside run_research_pipeline now)
                 asyncio.create_task(run_research_pipeline(
                     user_id=user_id,
                     resume_filename=resume_filename,
@@ -114,84 +126,79 @@ async def handle_agent_action(action, user_id, session_id, available_resumes, cu
                     location=location,
                     session_id=session_id
                 ))
-        else:
-            # Local Execution
-            asyncio.create_task(run_research_pipeline(
-                user_id=user_id,
-                resume_filename=resume_filename,
-                api_key=api_key,
-                limit=limit,
-                job_title=job_title,
-                location=location,
-                session_id=session_id
-            ))
 
-    elif action["type"] == "apply":
-        args = action["payload"]
-        job_url = args.get("job_url")
-        job_title = args.get("job_title")
-        resume_filename = args.get("resume_filename")
-        
-        # 1. Fallback: Lookup by Title
-        if not job_url and job_title:
-            lead = supabase_service.get_lead_by_title(user_id, job_title)
-            if lead:
-                job_url = lead['url']
-                extra_response = f"\n\n✅ Found job match: **{lead['title']}** at **{lead['company']}**"
-            else:
-                extra_response = f"\n\n❌ Could not find a saved job matching '**{job_title}**'. Please provide the URL or search for it first."
-                return extra_response # Stop here if failed logic?
-                
-        if not job_url:
-            return "\n\nI couldn't identify which job to apply to."
+        elif action["type"] == "apply":
+            args = action["payload"]
+            job_url = args.get("job_url")
+            job_title = args.get("job_title")
+            resume_filename = args.get("resume_filename")
+            
+            # 1. Fallback: Lookup by Title
+            if not job_url and job_title:
+                lead = supabase_service.get_lead_by_title(user_id, job_title)
+                if lead:
+                    job_url = lead['url']
+                    extra_response = f"\n\n✅ Found job match: **{lead['title']}** at **{lead['company']}**"
+                else:
+                    extra_response = f"\n\n❌ Could not find a saved job matching '**{job_title}**'. Please provide the URL or search for it first."
+                    return extra_response 
+                    
+            if not job_url:
+                return "\n\nI couldn't identify which job to apply to."
 
-        # 2. Resume Fallback
-        if not resume_filename:
-            user_row = supabase_service.get_user_by_email(current_user['email'])
-            profile_data = user_row.get('profile_data', {})
-            resume_filename = profile_data.get('primary_resume_name')
-            if resume_filename:
-                extra_response += f"\n\n(Using default resume: **{resume_filename}**)"
-            else:
-                return "\n\nI found the job but I don't know which resume to use. Please specify a resume or set a primary one in your Profile."
+            # 2. Resume Fallback
+            if not resume_filename:
+                user_row = supabase_service.get_user_by_email(current_user['email'])
+                profile_data = user_row.get('profile_data', {})
+                resume_filename = profile_data.get('primary_resume_name')
+                if resume_filename:
+                    extra_response += f"\n\n(Using default resume: **{resume_filename}**)"
+                else:
+                    return "\n\nI found the job but I don't know which resume to use. Please specify a resume or set a primary one in your Profile."
 
-        extra_instructions = args.get("extra_instructions")
-        mode = args.get("mode", "cloud")
-        use_cloud = (mode == "cloud")
-        
-        from app.services.agent_runner import run_applier_task
-        
-        user_data = supabase_service.get_user_by_email(current_user['email'])
-        profile_blob = user_data.get('profile_data', {})
-        if 'email' not in profile_blob: profile_blob['email'] = current_user['email']
-        if 'full_name' not in profile_blob and user_data.get('full_name'): profile_blob['full_name'] = user_data.get('full_name')
-        
-        if extra_instructions:
-            profile_blob['apply_instructions'] = extra_instructions
-        
-        supabase_service.update_lead_status_by_url(user_id, job_url, "IN_PROGRESS", resume_filename=resume_filename)
+            extra_instructions = args.get("extra_instructions")
+            mode = args.get("mode", "cloud")
+            use_cloud = (mode == "cloud")
+            
+            from app.services.agent_runner import run_applier_task
+            
+            user_data = supabase_service.get_user_by_email(current_user['email'])
+            profile_blob = user_data.get('profile_data', {})
+            if 'email' not in profile_blob: profile_blob['email'] = current_user['email']
+            if 'full_name' not in profile_blob and user_data.get('full_name'): profile_blob['full_name'] = user_data.get('full_name')
+            
+            if extra_instructions:
+                profile_blob['apply_instructions'] = extra_instructions
+            
+            supabase_service.update_lead_status_by_url(user_id, job_url, "IN_PROGRESS", resume_filename=resume_filename)
 
-        async def _run_apply():
-            try:
-                remote_path = f"{user_id}/{resume_filename}"
-                file_bytes = supabase_service.download_file(remote_path)
-                
-                tmp_path = f"/tmp/apply_{user_id}_{resume_filename}"
-                with open(tmp_path, "wb") as f:
-                    f.write(file_bytes)
-                
-                await run_applier_task(job_url, tmp_path, profile_blob, api_key, resume_filename=resume_filename, use_cloud=use_cloud, session_id=session_id)
-                
-                if os.path.exists(tmp_path):
-                    os.remove(tmp_path)
-            except Exception as e:
-                print(f"❌ Apply via Chat Failed: {e}")
-                supabase_service.update_lead_status_by_url(user_id, job_url, "FAILED")
-                supabase_service.save_chat_message(session_id, "model", f"❌ Application Failed: {e}")
+            async def _run_apply():
+                try:
+                    remote_path = f"{user_id}/{resume_filename}"
+                    file_bytes = supabase_service.download_file(remote_path)
+                    
+                    tmp_path = f"/tmp/apply_{user_id}_{resume_filename}"
+                    with open(tmp_path, "wb") as f:
+                        f.write(file_bytes)
+                    
+                    await run_applier_task(job_url, tmp_path, profile_blob, api_key, resume_filename=resume_filename, use_cloud=use_cloud, session_id=session_id)
+                    
+                    if os.path.exists(tmp_path):
+                        os.remove(tmp_path)
+                except Exception as e:
+                    print(f"❌ Apply via Chat Failed: {e}")
+                    supabase_service.update_lead_status_by_url(user_id, job_url, "FAILED")
+                    supabase_service.save_chat_message(session_id, "model", f"❌ Application Failed: {e}")
 
-        asyncio.create_task(_run_apply())
+            asyncio.create_task(_run_apply())
 
-    return extra_response
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return json.dumps({
+            "type": "error", 
+            "content": f"Failed to execute agent action: {str(e)}"
+        })
 
 @router.post("/message")
 async def chat_message(
@@ -248,13 +255,17 @@ async def chat_message(
         
         # 5. Handle Action Side-Effects
         if final_action:
-            extra_text = await handle_agent_action(final_action, user_id, session_id, available_resumes, current_user, api_key)
-            if extra_text:
-                full_response += extra_text
-                # Streaming extra text logic if needed, but for now just append to final
-                # Actually, if we want realtime, handle_agent_action should return quickly or we should stream its output?
-                # handle_agent_action mostly triggers bg tasks. 'extra_text' is usually quick validation msg.
-                yield json.dumps({"type": "token", "content": extra_text}) + "\n"
+            try:
+                extra_text = await handle_agent_action(final_action, user_id, session_id, available_resumes, current_user, api_key)
+                if extra_text:
+                    full_response += extra_text
+                    yield json.dumps({"type": "token", "content": extra_text}) + "\n"
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                error_msg = f"\n\n❌ Agent Error: {str(e)}"
+                full_response += error_msg
+                yield json.dumps({"type": "token", "content": error_msg}) + "\n"
 
         # 6. Save Final Bot Message
         supabase_service.save_chat_message(session_id, "model", full_response)

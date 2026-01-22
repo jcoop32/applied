@@ -17,8 +17,9 @@ gcloud run deploy $SERVICE_NAME \
   --project $PROJECT_ID \
   --region $REGION \
   --allow-unauthenticated \
-  --memory 2Gi \
-  --cpu 2 \
-  --timeout 3600
+  --memory 4Gi \
+  --cpu 4 \
+  --timeout 3600 \
+  --concurrency 1
 
 echo "✅ Deployment complete!"
