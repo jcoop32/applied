@@ -6,6 +6,8 @@ from app.services.supabase_client import supabase_service
 
 class ChatAgent:
     def __init__(self, api_key: str):
+        if not api_key:
+            raise ValueError("Gemini API Key is missing. Please check your .env file.")
         self.client = genai.Client(api_key=api_key)
         self.model_id = 'gemini-2.0-flash-exp' # Using Flash for speed/cost
 
@@ -131,35 +133,46 @@ class ChatAgent:
             accumulated_text = ""
             action = None
             
-            for chunk in response_stream:
-                # Check for Function Calls
-                # Function calls in streaming usually appear in specific chunks.
-                if chunk.function_calls:
-                    fc = chunk.function_calls[0]
-                    func_name = fc.name
-                    func_args = dict(fc.args)
-                    
-                    if func_name == "search_jobs":
-                        action = { "type": "research", "payload": func_args }
-                        msg = f"\n\n🚀 Starting research for **{func_args.get('limit', 20)}** jobs..."
-                        accumulated_text += msg
-                        yield { "type": "token", "content": msg }
-                    
-                    elif func_name == "apply_to_job":
-                        action = { "type": "apply", "payload": func_args }
-                        msg = f"\n\n📝 Starting application..."
-                        accumulated_text += msg
-                        yield { "type": "token", "content": msg }
-
-                    elif func_name == "ask_clarification":
-                        action = { "type": "clarification", "payload": func_args }
-                        # No extra text needed usually, but logic might vary
+            # Wrap the iteration in a try/except specifically for Stream consumption errors
+            try:
+                for chunk in response_stream:
+                    # Check for Function Calls
+                    # Function calls in streaming usually appear in specific chunks.
+                    if chunk.function_calls:
+                        fc = chunk.function_calls[0]
+                        func_name = fc.name
+                        func_args = dict(fc.args)
                         
-                # Check for Text
-                if chunk.text:
-                    text_chunk = chunk.text
-                    accumulated_text += text_chunk
-                    yield { "type": "token", "content": text_chunk }
+                        if func_name == "search_jobs":
+                            action = { "type": "research", "payload": func_args }
+                            msg = f"\n\n🚀 Starting research for **{func_args.get('limit', 20)}** jobs..."
+                            accumulated_text += msg
+                            yield { "type": "token", "content": msg }
+                        
+                        elif func_name == "apply_to_job":
+                            action = { "type": "apply", "payload": func_args }
+                            msg = f"\n\n📝 Starting application..."
+                            accumulated_text += msg
+                            yield { "type": "token", "content": msg }
+
+                        elif func_name == "ask_clarification":
+                            action = { "type": "clarification", "payload": func_args }
+                            # No extra text needed usually, but logic might vary
+                            
+                    # Check for Text safely
+                    # Gemini 2.0 SDK raises ValueError if accessing .text on non-text chunk
+                    try:
+                        if chunk.text:
+                            text_chunk = chunk.text
+                            accumulated_text += text_chunk
+                            yield { "type": "token", "content": text_chunk }
+                    except (AttributeError, ValueError):
+                        # Chunk might be function call only, ignore text access error
+                        pass
+            except Exception as stream_err:
+                print(f"Stream Loop Error: {stream_err}")
+                # Don't re-raise, try to return what we have
+                yield { "type": "token", "content": "\n(Stream interrupted)" }
 
             # If no text and no action, fallback
             if not accumulated_text and not action:

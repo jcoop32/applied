@@ -286,7 +286,7 @@ class ApplierAgent:
             print(f"⚠️ Browser Resolver failed: {e}")
             return url
 
-    async def apply(self, job_url: str, profile: Dict[str, Any], resume_path: str, dry_run: bool = False, lead_id: int = None, use_cloud: bool = False, session_id: int = None, instructions: str = None) -> str:
+    async def apply(self, job_url: str, profile: Dict[str, Any], resume_path: str, dry_run: bool = False, lead_id: int = None, use_managed_browser: bool = False, session_id: int = None, instructions: str = None) -> str:
         """
         Main entry point to apply for a job.
         Navigates, handles auth, fills forms, and optionally submits.
@@ -315,8 +315,8 @@ class ApplierAgent:
         if lead_id:
             # Determine execution mode for status visibility
             mode_label = "Standard"
-            if use_cloud:
-                mode_label = "Cloud"
+            if use_managed_browser:
+                mode_label = "Managed-Cloud"
             elif os.getenv("GITHUB_ACTIONS"):
                 mode_label = "GHA"
             
@@ -329,7 +329,7 @@ class ApplierAgent:
         # 2. Construct the Agent Task
         captcha_instruction = (
             " - **CLOUD MODE DETECTED**: The Cloud Browser acts as a persistent human. **WAIT 15 SECONDS**. Do NOT stop. The cloud system often solves it automatically."
-            if use_cloud else
+            if use_managed_browser else
             " - **IF IT FAILS OR REQUIRES SOLVING A PUZZLE**: \n               - **STOP IMMEDIATELY**. Do NOT try to guess. Do NOT ask user for help (they cannot see the screen).\n               - **RETURN FAILURE JSON**: `{{ \"status\": \"FAILED\", \"reason\": \"Visual CAPTCHA detected and blocked automation.\" }}`"
         )
 
@@ -419,10 +419,24 @@ class ApplierAgent:
 
         # Ensure browser has some security options disabled to allow file access if needed?
         # Usually standard config is fine.
-        if use_cloud or os.getenv("BROWSER_USE_API_KEY"):
+        if use_managed_browser or os.getenv("BROWSER_USE_API_KEY"):
+            print("☁️ Using Browser Use Cloud for enhanced stealth")
+            # Cloud browser does not support 'headless' arg in the same way, usually handled remote
+        if use_managed_browser or os.getenv("BROWSER_USE_API_KEY"):
             print("☁️ Using Browser Use Cloud for enhanced stealth")
             # Cloud browser does not support 'headless' arg in the same way, usually handled remote
             browser = Browser(use_cloud=True)
+            try:
+                # Attempt to get session ID for live view
+                # This depends on browser-use internals, assuming browser.session_id or browser.config.session_id
+                b_session_id = getattr(browser, 'session_id', None)
+                if b_session_id:
+                    session_url = f"https://cloud.browser-use.com/sessions/{b_session_id}"
+                    print(f"🔗 Browser Use Session: {session_url}")
+                    if session_id:
+                         supabase_service.save_chat_message(session_id, "model", f"🔗 **Watch Live on Browser Use Cloud**: [Click Here]({session_url})")
+            except Exception as e:
+                print(f"could not extract session url: {e}")
         else:
             browser = Browser(headless=self.headless)
 

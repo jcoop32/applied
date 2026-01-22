@@ -130,3 +130,13 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
 @router.get("/me", response_model=UserResponse)
 async def read_users_me(current_user: dict = Depends(get_current_user)):
     return current_user
+
+@router.get("/config")
+async def get_frontend_config(current_user: dict = Depends(get_current_user)):
+    """
+    Returns public configuration for the frontend.
+    """
+    return {
+        "supabase_url": os.getenv("SUPABASE_URL"),
+        "supabase_anon_key": os.getenv("SUPABASE_KEY") # Usually the Anon Key for client usage
+    }

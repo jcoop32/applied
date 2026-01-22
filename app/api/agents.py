@@ -150,6 +150,7 @@ async def trigger_apply(
     job_url = payload.get("job_url")
     resume_filename = payload.get("resume_filename")
     instructions = payload.get("instructions") # Optional
+    mode = payload.get("mode", "local") # Extract mode (local, cloud_run, browser_use_cloud)
 
     if not job_url or not resume_filename:
         raise HTTPException(status_code=400, detail="job_url and resume_filename required")
@@ -173,23 +174,14 @@ async def trigger_apply(
 
     # Logic Switch
     should_dispatch_github = False
-    use_cloud_browser = False
-
+    
+    # Legacy 'github' mode support if we re-introduce it
     if mode == 'github':
         should_dispatch_github = True
-    elif mode == 'cloud':
-        # Local/Server-side execution BUT with Cloud Browser
-        should_dispatch_github = False 
-        use_cloud_browser = True
-    elif mode == 'local':
-        # Explicit local mode - no GitHub Actions, no cloud browser
-        should_dispatch_github = False
-        use_cloud_browser = False
-    else:
-        # Fallback to legacy ENV variable logic
-        if USE_GITHUB_ACTIONS:
-            should_dispatch_github = True
-        # else local/standard
+    elif USE_GITHUB_ACTIONS and mode == 'gha': # Explicit GHA request
+        should_dispatch_github = True
+    
+    # Otherwise we rely on agent_runner to handle local/cloud_run/browser_use_cloud logic
 
     # Create Persistent Chat Session (Always)
     session_title = f"Apply: {job_url}"
@@ -237,7 +229,7 @@ async def trigger_apply(
                 f.write(file_bytes)
 
             # 2. Run Applier
-            await run_applier_task(job_url, tmp_path, profile_blob, api_key, resume_filename=resume_filename, use_cloud=use_cloud_browser, session_id=session_id, instructions=instructions)
+            await run_applier_task(job_url, tmp_path, profile_blob, api_key, resume_filename=resume_filename, execution_mode=mode, session_id=session_id, instructions=instructions)
 
             # 3. Cleanup
             if os.path.exists(tmp_path):

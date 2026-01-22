@@ -85,7 +85,7 @@
     </div>
 
     <!-- Scripts -->
-    <script src="/static/script.js"></script>
+    <script src="/static/script.js?v=debug_v3"></script>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             // We'll expose initJobsPage in script.js or define logic here?
@@ -141,19 +141,52 @@
                     <label style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 0.9rem;">
                         Execution Mode
                     </label>
-                    <div style="display: flex; gap: 20px;">
-                        <label style="display: flex; align-items: center; cursor: pointer;">
-                            <input type="radio" name="execution-mode" value="cloud" checked style="margin-right: 8px;">
-                            <span style="color: var(--text-primary);">Cloud (Recommended)</span>
+                    <div style="display: flex; gap: 15px; flex-direction: column;">
+                        <!-- Option 1: Browser Use Cloud (Managed) -->
+                        <label
+                            style="display: flex; align-items: flex-start; cursor: pointer; background: rgba(255,255,255,0.05); padding: 10px; border-radius: 6px;">
+                            <input type="radio" name="execution-mode" value="browser_use_cloud"
+                                style="margin-right: 12px; margin-top: 4px;">
+                            <div>
+                                <span style="display:block; color: var(--text-primary); font-weight: 500;">Browser Use
+                                    Cloud</span>
+                                <span
+                                    style="display:block; font-size: 0.8rem; color: var(--text-secondary); margin-top: 3px;">
+                                    Uses managed cloud browser. View live stream on dashboard.
+                                </span>
+                            </div>
                         </label>
-                        <label style="display: flex; align-items: center; cursor: pointer;">
-                            <input type="radio" name="execution-mode" value="local" style="margin-right: 8px;">
-                            <span style="color: var(--text-primary);">Local</span>
+
+                        <!-- Option 2: Google Cloud Run (Self-Hosted) -->
+                        <label
+                            style="display: flex; align-items: flex-start; cursor: pointer; background: rgba(255,255,255,0.05); padding: 10px; border-radius: 6px;">
+                            <input type="radio" name="execution-mode" value="cloud_run" checked
+                                style="margin-right: 12px; margin-top: 4px;">
+                            <div>
+                                <span style="display:block; color: var(--text-primary); font-weight: 500;">Google Cloud
+                                    Run (Recommended)</span>
+                                <span
+                                    style="display:block; font-size: 0.8rem; color: var(--text-secondary); margin-top: 3px;">
+                                    Runs on your specific Cloud Run instance. View live stream in chat.
+                                </span>
+                            </div>
+                        </label>
+
+                        <!-- Option 3: Local -->
+                        <label
+                            style="display: flex; align-items: flex-start; cursor: pointer; background: rgba(255,255,255,0.05); padding: 10px; border-radius: 6px;">
+                            <input type="radio" name="execution-mode" value="local"
+                                style="margin-right: 12px; margin-top: 4px;">
+                            <div>
+                                <span style="display:block; color: var(--text-primary); font-weight: 500;">Local
+                                    Machine</span>
+                                <span
+                                    style="display:block; font-size: 0.8rem; color: var(--text-secondary); margin-top: 3px;">
+                                    Runs invisibly on your machine (Headless) or visible if configured.
+                                </span>
+                            </div>
                         </label>
                     </div>
-                    <p style="margin-top: 5px; font-size: 0.8rem; color: var(--text-secondary); opacity: 0.7;">
-                        Cloud mode puts the browser in the cloud for better stealth. Local runs on your machine.
-                    </p>
                 </div>
 
                 <!-- Additional Instructions -->

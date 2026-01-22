@@ -38,18 +38,41 @@ def update_research_status(user_id: int, resume_filename: str, status: str):
         logger.error(f"Failed to update research status: {e}")
 
 
+
+async def check_cancellation(user_id: int, resume_filename: str):
+    """Checks if the research task has been cancelled by the user."""
+    try:
+        response = supabase_service.client.table("profiles").select("profile_data").eq("user_id", user_id).execute()
+        if response.data:
+            data = response.data[0].get("profile_data", {})
+            status_entry = data.get("research_status", {}).get(resume_filename, {})
+            if status_entry.get("status") == "CANCEL_REQUESTED":
+                return True
+    except Exception:
+        pass
+    return False
+
 async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str, limit: int = 20, job_title: str = None, location: str = None, session_id: int = None):
     print(f"🕵️ Worker: Starting Research for {resume_filename} with limit {limit} (Type: Google)...")
-    if session_id:
-        supabase_service.save_chat_message(session_id, "model", f"fe0f Starting Research for **{resume_filename}**...")
-        await log_stream_manager.broadcast(str(session_id), f"Starting research pipeline for {resume_filename}...")
+    
+    # Broadcast Function helper (Switching to Supabase Realtime broadcast via Service in future, 
+    # but for now, we ensure we write critical logs to Chat History if not streaming locally)
+    async def log(msg, type="log"):
+        if session_id:
+            await log_stream_manager.broadcast(str(session_id), msg, type=type)
+            # Also save to DB for persistence if it's a major event
+            if type in ["complete", "error", "warning"]:
+                # We do NOT save every log to DB to avoid clutter, relying on Realtime
+                pass
+
+    await log(f"Starting research pipeline for {resume_filename}...")
     
     # Cloud Dispatch Check
     cloud_url = os.getenv("CLOUD_RUN_URL")
     if cloud_url and not os.getenv("IS_CLOUD_WORKER"):
         import httpx
         print(f"🚀 Dispatching Research task to Cloud Worker: {cloud_url}")
-        if session_id: await log_stream_manager.broadcast(str(session_id), "Dispatching to Cloud Worker...")
+        await log("Dispatching to Cloud Worker...")
         
         try:
             async with httpx.AsyncClient() as client:
@@ -67,18 +90,19 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
                 resp = await client.post(f"{cloud_url}/api/worker/task", json=payload, headers=headers, timeout=10.0)
                 if resp.status_code != 200:
                     print(f"❌ Cloud Dispatch Failed: {resp.text}")
-                    # Fallthrough to local if dispatch fails? Or just return?
-                    # Let's fallthrough to local execution as backup
-                    if session_id: await log_stream_manager.broadcast(str(session_id), "Cloud dispatch failed, running locally...", type="warning")
+                    await log("Cloud dispatch failed, running locally...", type="warning")
                 else:
                     return # Successfully dispatched
         except Exception as e:
              print(f"❌ Cloud Dispatch Error: {traceback.format_exc()}")
-             if session_id: await log_stream_manager.broadcast(str(session_id), f"Cloud dispatch error: {e}, running locally...", type="warning")
+             await log(f"Cloud dispatch error: {e}, running locally...", type="warning")
 
     update_research_status(user_id, resume_filename, "SEARCHING")
 
     try:
+        # CANCELLATION CHECK
+        if await check_cancellation(user_id, resume_filename): raise asyncio.CancelledError()
+
         # 1. Download Resume File
         remote_path = f"{user_id}/{resume_filename}"
 
@@ -90,7 +114,7 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
             return
 
         # Save temp for parsing
-        if session_id: await log_stream_manager.broadcast(str(session_id), "Downloading resume file...")
+        await log("Downloading resume file...")
         import uuid
         tmp_id = str(uuid.uuid4())
         tmp_path = f"/tmp/{tmp_id}_{resume_filename}"
@@ -98,23 +122,21 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
         with open(tmp_path, "wb") as f:
             f.write(file_bytes)
 
+        # CANCELLATION CHECK
+        if await check_cancellation(user_id, resume_filename): raise asyncio.CancelledError()
+
         # 2. Parse Resume (Dynamic)
         from app.utils.resume_parser import ResumeParser
         parser = ResumeParser(api_key=api_key)
 
         # Parse returns a JSON string, we need to load it
-        if session_id: await log_stream_manager.broadcast(str(session_id), "Parsing resume with Gemini 2.5 Flash...")
+        await log("Parsing resume with Gemini 2.5 Flash...")
         parsed_json_str = await parser.parse_to_json(tmp_path)
 
         # Guard against Non-string return (e.g. None)
         if not parsed_json_str or not isinstance(parsed_json_str, str):
             print(f"⚠️ Parsing returned empty or invalid type: {type(parsed_json_str)}")
-            # Try to recover or fail
-            # Just create a minimal blob so we don't crash
             profile_blob = {"raw_text": "Parsing Failed or Empty Response"}
-            # OR fail? If parsing fails, research is garbage.
-            # Let's try to proceed with minimal info if possible, but usually this is fatal.
-            # But earlier fallback code exists.
         else:
             try:
                 profile_blob = json.loads(parsed_json_str)
@@ -136,9 +158,12 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
 
         print(f"📄 Parsed Profile for {resume_filename}: {profile_blob.get('full_name', 'Unknown')}")
 
+        # CANCELLATION CHECK
+        if await check_cancellation(user_id, resume_filename): raise asyncio.CancelledError()
+
         # 3. Research
         print("🔎 Using Google Verification Agent...")
-        if session_id: await log_stream_manager.broadcast(str(session_id), f"Searching Google for top {limit} jobs (this may take a moment)...")
+        await log(f"Searching Google for top {limit} jobs (this may take a moment)...")
         researcher = GoogleResearcherAgent(api_key=api_key)
              
         # We use the DYNAMIC profile_blob here
@@ -149,10 +174,14 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
         for lead in leads:
             lead['query_source'] = f"{prefix}|{lead.get('query_source', 'Unknown')}"
 
+        # CANCELLATION CHECK
+        if await check_cancellation(user_id, resume_filename): raise asyncio.CancelledError()
+
         # 4. Match
-        if session_id: await log_stream_manager.broadcast(str(session_id), f"Found {len(leads)} raw leads. analyzing matches with Matcher Agent...")
+        await log(f"Found {len(leads)} raw leads. analyzing matches with Matcher Agent...")
         matcher = MatcherAgent(api_key=api_key)
-        scored_matches = await matcher.filter_and_score_leads(leads, profile_blob, limit=10)
+        # Fix: Use the requested limit, not hardcoded 10
+        scored_matches = await matcher.filter_and_score_leads(leads, profile_blob, limit=limit)
 
         # 5. Save Results
         # Save to Storage as JSON (Legacy Backup) & DB
@@ -174,19 +203,20 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
         print(f"✅ Worker: Research Completed. Saved {len(scored_matches)} matches.")
         update_research_status(user_id, resume_filename, "COMPLETED")
         
+        await log(f"Done! Found {len(scored_matches)} matches.", type="complete")
         if session_id:
-            await log_stream_manager.broadcast(str(session_id), f"Done! Found {len(scored_matches)} matches.", type="complete")
             supabase_service.save_chat_message(session_id, "model", f"✅ Research Complete! Found **{len(scored_matches)}** matches.\n\nCheck the **Jobs** tab or reload your dashboard.")
 
     except asyncio.CancelledError:
         print(f"🛑 Worker: Research Cancelled for {resume_filename}")
+        await log("Research cancelled by user.", type="error")
         if session_id:
-            await log_stream_manager.broadcast(str(session_id), "Research cancelled by user.", type="error")
             supabase_service.save_chat_message(session_id, "model", "🛑 Research Cancelled by user.")
         update_research_status(user_id, resume_filename, "CANCELLED")
         
     except Exception as e:
         print(f"❌ Worker: Research Failed: {e}")
+        traceback.print_exc()
         if session_id:
             supabase_service.save_chat_message(session_id, "model", f"❌ Research Failed: {e}")
             
@@ -197,20 +227,24 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
              print(f"❌ Failed to final update status: {status_err}")
 
 
-async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, api_key: str, resume_filename: str = None, use_cloud: bool = False, session_id: int = None, instructions: str = None):
+async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, api_key: str, resume_filename: str = None, execution_mode: str = "local", session_id: int = None, instructions: str = None):
     print(f"🚀 Worker: Applying to {job_url} ...")
+    
+    async def log(msg, type="log"):
+         if session_id: await log_stream_manager.broadcast(str(session_id), msg, type=type)
+
     if session_id:
         supabase_service.save_chat_message(session_id, "model", f"🚀 Starting Application to **{job_url}**...")
-        await log_stream_manager.broadcast(str(session_id), f"Initializing application agent for: {job_url}")
+        await log(f"Initializing application agent for: {job_url}")
 
     # Cloud Dispatch Check
     cloud_url = os.getenv("CLOUD_RUN_URL")
     # Only dispatch if we are not ALREADY in the cloud worker (prevent infinite loop if env vars are confusing)
     # But user_profile needs to be passed carefully.
-    if cloud_url and not os.getenv("IS_CLOUD_WORKER") and use_cloud:
+    if cloud_url and not os.getenv("IS_CLOUD_WORKER") and execution_mode == 'cloud_run':
         import httpx
         print(f"🚀 Dispatching Applier task to Cloud Worker: {cloud_url}")
-        if session_id: await log_stream_manager.broadcast(str(session_id), "Dispatching Applier to Cloud Worker...")
+        await log("Dispatching Applier to Cloud Worker...")
         
         try:
             async with httpx.AsyncClient() as client:
@@ -223,7 +257,10 @@ async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, a
                     "user_profile": user_profile,
                     "api_key": api_key,
                     "resume_filename": resume_filename,
-                    "use_cloud": True, # Force true on worker
+                    "execution_mode": "local", # Worker runs it as local relative to itself (headless default), UNLESS we want worker to use managed?
+                    # Actually if user wants Cloud Run + Managed Browser, we don't support that combo yet in UI.
+                    # UI has "Google Cloud Run" (self-hosted) OR "Browser Use Cloud" (managed).
+                    # "Google Cloud Run" implies self-hosted headless.
                     "session_id": session_id,
                     "instructions": instructions
                 }
@@ -258,15 +295,20 @@ async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, a
         # Detect environment for headless mode
         is_headless = os.getenv("HEADLESS", "false").lower() == "true" or os.getenv("GITHUB_ACTIONS") == "true"
         applier = ApplierAgent(api_key=api_key, headless=is_headless)
-        if session_id: await log_stream_manager.broadcast(str(session_id), f"Launching browser (Headless={is_headless}, Cloud={use_cloud})...")
+        if execution_mode == 'browser_use_cloud':
+            use_managed_browser = True
+        else:
+            use_managed_browser = False
+        
+        await log(f"Launching browser (Headless={is_headless}, Managed Cloud={use_managed_browser})...")
         
         # Pass lead_id and instructions to apply method
-        result_status = await applier.apply(job_url, user_profile, resume_path, lead_id=lead_id, use_cloud=use_cloud, session_id=session_id, instructions=instructions)
+        result_status = await applier.apply(job_url, user_profile, resume_path, lead_id=lead_id, use_managed_browser=use_managed_browser, session_id=session_id, instructions=instructions)
         
         print(f"🏁 Worker: Applier finished: {result_status}")
         
+        await log(f"Application finished: {result_status}", type="complete")
         if session_id:
-            await log_stream_manager.broadcast(str(session_id), f"Application finished: {result_status}", type="complete")
             supabase_service.save_chat_message(session_id, "model", f"🏁 Application Finished. Status: **{result_status}**")
         
         if lead_id:

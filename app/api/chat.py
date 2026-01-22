@@ -86,6 +86,12 @@ async def handle_agent_action(action, user_id, session_id, available_resumes, cu
             from app.services.agent_runner import run_research_pipeline, update_research_status
             from app.services.github import dispatch_github_action
             
+            # Idempotency Check
+            current_status = supabase_service.get_research_status(user_id).get(resume_filename, {}).get("status")
+            if current_status in ["SEARCHING", "QUEUED"]:
+                msg = f"\n\n(⚠️ Research for **{resume_filename}** is already in progress. Please wait or cancel the current task.)"
+                return msg
+
             update_research_status(user_id, resume_filename, "SEARCHING")
             use_gha = os.getenv("USE_GITHUB_ACTIONS", "false").lower() == "true"
             
@@ -289,3 +295,27 @@ async def stream_logs(session_id: str):
         log_stream_manager.subscribe(session_id), 
         media_type="text/event-stream"
     )
+
+@router.post("/research/cancel")
+async def cancel_research(
+    payload: dict = Body(...),
+    current_user: dict = Depends(get_current_user)
+):
+    resume_filename = payload.get("resume_filename")
+    if not resume_filename:
+        # Try primary resume
+        profile = supabase_service.get_user_profile(current_user['id'])
+        resume_filename = profile.get("primary_resume_name")
+        
+    if not resume_filename:
+         raise HTTPException(status_code=400, detail="Resume filename required")
+
+    from app.services.agent_runner import update_research_status
+    update_research_status(current_user['id'], resume_filename, "CANCEL_REQUESTED")
+    
+    # Also notify session if provided
+    session_id = payload.get("session_id")
+    if session_id:
+        supabase_service.save_chat_message(session_id, "model", "🛑 Cancellation requested... Stopping agents.")
+        
+    return {"status": "cancelled", "resume": resume_filename}

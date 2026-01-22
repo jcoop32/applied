@@ -40,3 +40,39 @@
 1.  **Optimized Prompt:** Updated `GoogleResearcherAgent` prompt to strictly forbid reasoning/markdown blocks and enforce conciseness ("Snippets must be under 20 words").
 2.  **Increased Token Limit:** Updated `ChatGoogle` init to set `max_output_tokens` to 8192 as a safety buffer.
 3.  **Improved Logging:** Updated `agent_runner.py` to use `traceback.format_exc()` for full error visibility.
+
+## User Report: 2026-01-21
+**Error:** FIND JOBS and Apply buttons not working. Chat returns "Something went wrong" immediately.
+**Root Cause:**
+1. Frontend: Race conditions with `window.func` assignments and HTML `onclick` attributes. Dynamic buttons need explicit event listeners.
+2. Backend: `ChatAgent` crashes when Gemini 2.0 stream returns a `function_call` chunk because `chunk.text` access raises ValueError on non-text chunks.
+**Fix Strategy:**
+1. Frontend: Refactor `script.js` to remove `onclick` attributes and attach `addEventListener` in `initChatPage` and `loadJobs`.
+2. Backend: Wrap `response_stream` loop in `try/except` in `chat_agent.py` and safely access `chunk.text` using `getattr` or `parts` check.
+3. API: Ensure `handle_agent_action` in `chat.py` catches all exceptions and returns formatted JSON errors.
+
+## User Report: 2026-01-21 (2)
+**Error:** Apply button on Job Leads page is unresponsive. No feedback/modal.
+**Root Cause:** (Investigation) Potential silent failure in `openApplyModal` or `loadJobs` event binding. The `resumeName` passed to the closure might be invalid, or `initApplyModal` might be failing to inject the modal on the Jobs page specifically.
+**Fix Strategy:**
+1.  Instrument `script.js` with `console.log` in `loadJobs` (binding) and `openApplyModal` (execution).
+2.  Add a `try/catch` block inside the click handler to `alert()` errors to the user.
+3.  Verify `initApplyModal` correctly injects the modal if missing.
+
+## User Report: 2026-01-21 (3)
+**Error:** `ReferenceError: handleApplyResumeUpload is not defined` when clicking Apply.
+**Root Cause:** The `initApplyModal` function attempts to attach an event listener to `handleApplyResumeUpload`, but this function is not defined in `script.js`. It was likely referenced in a plan but never implemented.
+**Fix Strategy:**
+1.  Implement `handleApplyResumeUpload` in `script.js`.
+2.  Logic should mirror `handleFileUpload` but update the Apply Modal's resume select dropdown upon success instead of just chatting.
+
+## User Report: 2026-01-21 (Find Jobs Error)
+**Error:** `ChatGoogle.__init__() got an unexpected keyword argument 'generation_config'`. Multiple "Starting Research" messages. Requested 5 jobs, got 10.
+**Root Cause:**
+1. `GoogleResearcherAgent`: The `ChatGoogle` wrapper (likely Langchain-based) does not accept `generation_config` in `__init__`. It was added in a previous attempt to fix token limits.
+2. Duplicate Logs: `agent_runner.py` was saving a "Starting Research" chat message in addition to the one yielded by `ChatAgent`.
+3. Incorrect Limit: `agent_runner.py` was hardcoding `limit=10` in the `MatcherAgent` call, ignoring the user-requested limit passed from `ChatAgent`.
+**Fix Strategy:**
+1. Updated `GoogleResearcherAgent` to pass `max_output_tokens=8192` directly (or via `model_kwargs` if needed, but trying direct arg first).
+2. Removed the redundant `supabase_service.save_chat_message` call in `agent_runner.py`.
+3. Updated `agent_runner.py` to pass the dynamic `limit` variable to `matcher.filter_and_score_leads`.

@@ -70,6 +70,8 @@ async function checkAuth() {
 
         const userEmailDisplay = document.getElementById("user-email-display");
         if (userEmailDisplay) userEmailDisplay.textContent = currentUser.email;
+
+        initRealtime(); // Initialize Realtime Subscriptions
     } catch (e) {
         // Redirect handled in authFetch
     }
@@ -121,10 +123,19 @@ function initChatPage() {
         newChatBtn.addEventListener("click", startNewChat);
     }
 
-    // Expose global actions
+    // Explicitly attach listeners to Research Buttons (Find Jobs)
+    const researchBtns = document.querySelectorAll(".research-btn");
+    researchBtns.forEach(btn => {
+        btn.addEventListener("click", openSearchConfigModal);
+    });
+
+    // Attach listeners to Update Resume buttons or others if needed
+    // (Attach Resume logic is handled in initAttachResume)
+
+    // Expose global actions (Keep for now if legacy references exist, but primary is via listeners)
     window.triggerResearch = triggerResearch;
     window.triggerApply = triggerApply;
-    window.openSearchConfigModal = openSearchConfigModal;
+    // window.openSearchConfigModal = openSearchConfigModal; // Removed reliance
 
     initMentionSystem();
     initAttachResume();
@@ -717,29 +728,145 @@ async function handleFileUpload(e) {
     }
 }
 
-async function checkResearcherVisibility() {
-    const btns = document.querySelectorAll(".research-btn");
-    if (!btns || btns.length === 0) return;
+let supabaseClient = null;
 
-    // Default hidden handled by logic below
+async function initRealtime() {
+    try {
+        const configRes = await authFetch('/api/auth/config');
+        if (!configRes.ok) return;
+        const config = await configRes.json();
+
+        if (window.supabase) {
+            supabaseClient = window.supabase.createClient(config.supabase_url, config.supabase_anon_key);
+            console.log("🔌 Supabase Realtime Initialized");
+
+            if (!currentUser) return;
+
+            // Subscribe to Profiles (Status Updates)
+            supabaseClient
+                .channel('public:profiles')
+                .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `user_id=eq.${currentUser.id}` }, (payload) => {
+                    console.log("Realtime: Profile Update", payload);
+                    updateResearchUI(payload.new);
+                })
+                .subscribe();
+
+            // Subscribe to Leads (New Jobs)
+            // Note: RLS might prevent receiving events if row-level security is strict on real-time
+            supabaseClient
+                .channel('public:job_leads')
+                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'job_leads', filter: `user_id=eq.${currentUser.id}` }, (payload) => {
+                    console.log("Realtime: New Lead", payload);
+                    // Toast or refresh jobs if on jobs page
+                    showLogInternal(`New Job Found: ${payload.new.company_name} - ${payload.new.title}`, "success");
+                })
+                .subscribe();
+
+            // Initial UI Check
+            const res = await authFetch(`${API_BASE}/profile`);
+            const data = await res.json();
+            updateResearchUI(data);
+        }
+    } catch (e) {
+        console.error("Realtime Init Failed", e);
+    }
+}
+
+async function updateResearchUI(profileData) {
+    if (!profileData) return;
+
+    // 1. Check Primary Resume existence
+    const hasResume = !!profileData.primary_resume_name;
+    const btns = document.querySelectorAll(".research-btn");
+
+    btns.forEach(btn => {
+        if (!hasResume) {
+            btn.style.display = "none";
+            return;
+        }
+        btn.style.display = "inline-flex";
+    });
+
+    // 2. Check Research Status
+    // profileData.profile_data might be JSON string or object depending on source
+    let pArgs = profileData.profile_data || {};
+    if (typeof pArgs === 'string') {
+        try { pArgs = JSON.parse(pArgs); } catch (e) { }
+    }
+
+    const startBtns = document.querySelectorAll(".research-btn");
+    const statusBox = document.getElementById("research-status-container") || createStatusContainer();
+
+    // Check status of primary resume
+    const resumeName = profileData.primary_resume_name;
+    const statusObj = (pArgs.research_status || {})[resumeName] || {};
+    const status = statusObj.status || "IDLE";
+
+    // Reset Buttons text
+    startBtns.forEach(btn => {
+        if (status === "SEARCHING" || status === "QUEUED") {
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Researching...';
+            btn.disabled = true;
+            btn.style.background = "#555";
+        } else {
+            btn.innerHTML = '<i class="fas fa-search"></i> Find Jobs';
+            btn.disabled = false;
+            btn.style.background = "linear-gradient(135deg, #4285f4, #34a853)";
+        }
+    });
+
+    // Update Status Box / Cancel Button
+    if (status === "SEARCHING" || status === "QUEUED") {
+        statusBox.style.display = "flex";
+        statusBox.innerHTML = `
+            <span class="status-text"><i class="fas fa-sync fa-spin"></i> Finding text...</span>
+            <button id="cancel-research-btn" class="cancel-btn">Stop</button>
+        `;
+        document.getElementById("cancel-research-btn").onclick = () => cancelResearch(resumeName);
+    } else {
+        statusBox.style.display = "none";
+        if (status === "COMPLETED") {
+            // Optional: Show toast "Research Complete"
+        }
+    }
+}
+
+function createStatusContainer() {
+    const container = document.createElement("div");
+    container.id = "research-status-container";
+    container.className = "status-floater";
+    // Append to Header or Chat Area
+    const header = document.querySelector(".chat-header");
+    if (header) header.appendChild(container);
+    return container;
+}
+
+async function cancelResearch(resumeName) {
+    if (!confirm("Stop current research task?")) return;
 
     try {
-        // Fetch profile to check resume
+        const res = await authFetch(`${API_BASE}/chat/research/cancel`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ resume_filename: resumeName, session_id: currentSessionId })
+        });
+        if (res.ok) {
+            showLogInternal("🛑 Cancellation requested.", "warning");
+        }
+    } catch (e) {
+        console.error("Cancel failed", e);
+    }
+}
+
+// Replaces checkResearcherVisibility
+// Called by initChatPage
+async function checkResearcherVisibility() {
+    // Just trigger the update logic which fetches profile
+    try {
         const res = await authFetch(`${API_BASE}/profile`);
         const data = await res.json();
-        const hasResume = !!data.primary_resume_name;
-
-        // Just hide/show
-        btns.forEach(btn => {
-            if (hasResume) {
-                btn.style.display = "inline-flex";
-            } else {
-                btn.style.display = "none";
-            }
-        });
-    } catch (e) {
-        btns.forEach(btn => btn.style.display = "none");
-    }
+        updateResearchUI(data);
+    } catch (e) { }
 }
 
 async function triggerResearch() {
@@ -1120,9 +1247,10 @@ function showApplyModeModal(url, title) {
                             ☁️ Run in Cloud
                         </button>
                     </div>
-                    <p style="margin-top: 15px; font-size: 0.85rem; color: var(--text-secondary);">
-                        Cloud mode bypasses CAPTCHAs and provides enhanced stealth.
-                    </p>
+                    <div style="margin-top: 15px; font-size: 0.85rem; color: var(--text-secondary); text-align: left; line-height: 1.4;">
+                        <p style="margin-bottom: 5px;"><i class="fas fa-cloud"></i> <strong>Cloud:</strong> Runs on Google Cloud (Recommended). Watch live in chat.</p>
+                        <p style="margin: 0;"><i class="fas fa-desktop"></i> <strong>Local:</strong> Runs visibly on your machine.</p>
+                    </div>
                 </div>
             </div>
         `;
@@ -1458,10 +1586,20 @@ async function loadJobs(resumeName) {
                 </div>
             `;
 
-            // Add click handler for Apply button
+            // Add click handler for Apply button - Explicitly using addEventListener
             const applyBtn = div.querySelector('.apply-chat-btn');
             if (applyBtn) {
-                applyBtn.addEventListener('click', () => openApplyModal(lead, resumeName));
+                // Ensure we clear any old listeners if this was re-rendered (fresh element anyway)
+                applyBtn.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    // console.log("Clicked Apply for:", lead.title, "Resume:", resumeName);
+                    try {
+                        openApplyModal(lead, resumeName);
+                    } catch (err) {
+                        console.error("Error opening apply modal:", err);
+                        alert("Error opening apply modal: " + err.message);
+                    }
+                });
             }
             container.appendChild(div);
         });
@@ -1771,14 +1909,38 @@ function injectApplyModalHtml() {
 
                 <div style="margin-bottom: 20px;">
                     <label style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 0.9rem;">Execution Mode</label>
-                    <div style="display: flex; gap: 20px;">
-                        <label style="display: flex; align-items: center; cursor: pointer;">
-                            <input type="radio" name="execution-mode" value="cloud" checked style="margin-right: 8px;">
-                            <span style="color: var(--text-primary);">Cloud (Recommended)</span>
+                    <div style="display: flex; gap: 15px; flex-direction: column;">
+                         <!-- Option 1: Browser Use Cloud (Managed) -->
+                        <label style="display: flex; align-items: flex-start; cursor: pointer; background: rgba(255,255,255,0.05); padding: 10px; border-radius: 6px;">
+                            <input type="radio" name="execution-mode" value="browser_use_cloud" style="margin-right: 12px; margin-top: 4px;">
+                            <div>
+                                <span style="display:block; color: var(--text-primary); font-weight: 500;">Browser Use Cloud</span>
+                                <span style="display:block; font-size: 0.8rem; color: var(--text-secondary); margin-top: 3px;">
+                                    Uses managed cloud browser. View live stream on dashboard.
+                                </span>
+                            </div>
                         </label>
-                        <label style="display: flex; align-items: center; cursor: pointer;">
-                            <input type="radio" name="execution-mode" value="local" style="margin-right: 8px;">
-                            <span style="color: var(--text-primary);">Local</span>
+
+                        <!-- Option 2: Google Cloud Run (Self-Hosted) -->
+                        <label style="display: flex; align-items: flex-start; cursor: pointer; background: rgba(255,255,255,0.05); padding: 10px; border-radius: 6px;">
+                            <input type="radio" name="execution-mode" value="cloud_run" checked style="margin-right: 12px; margin-top: 4px;">
+                            <div>
+                                <span style="display:block; color: var(--text-primary); font-weight: 500;">Google Cloud Run (Recommended)</span>
+                                <span style="display:block; font-size: 0.8rem; color: var(--text-secondary); margin-top: 3px;">
+                                    Runs on your specific Cloud Run instance. View live stream in chat.
+                                </span>
+                            </div>
+                        </label>
+
+                        <!-- Option 3: Local -->
+                        <label style="display: flex; align-items: flex-start; cursor: pointer; background: rgba(255,255,255,0.05); padding: 10px; border-radius: 6px;">
+                            <input type="radio" name="execution-mode" value="local" style="margin-right: 12px; margin-top: 4px;">
+                            <div>
+                                <span style="display:block; color: var(--text-primary); font-weight: 500;">Local Machine</span>
+                                <span style="display:block; font-size: 0.8rem; color: var(--text-secondary); margin-top: 3px;">
+                                    Runs invisibly on your machine (Headless) or visible if configured.
+                                </span>
+                            </div>
                         </label>
                     </div>
                 </div>
@@ -1797,8 +1959,51 @@ function injectApplyModalHtml() {
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 }
 
+// Handle Resume Upload inside Apply Modal
+async function handleApplyResumeUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const statusEl = document.getElementById("apply-upload-status");
+    if (statusEl) statusEl.textContent = "Uploading...";
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const token = localStorage.getItem("token");
+    try {
+        const res = await fetch(`${API_BASE}/upload`, {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${token}` },
+            body: formData
+        });
+
+        if (res.ok) {
+            if (statusEl) statusEl.innerHTML = '<span style="color: var(--accent-color);">✅ Uploaded!</span>';
+
+            // Refresh the select dropdown
+            const resumeSelect = document.getElementById('apply-resume-select');
+            if (resumeSelect) {
+                // Add new option and select it
+                const opt = document.createElement('option');
+                opt.value = file.name;
+                opt.textContent = file.name;
+                opt.selected = true;
+                resumeSelect.appendChild(opt);
+                // Ideally we should re-fetch all to ensure order/metadata, but this is faster feedback
+            }
+        } else {
+            if (statusEl) statusEl.textContent = "❌ Upload failed.";
+        }
+    } catch (e) {
+        console.error("Apply upload failed", e);
+        if (statusEl) statusEl.textContent = "❌ Error uploading.";
+    }
+}
+
 // Open Apply Modal with job data
 async function openApplyModal(lead, contextResumeName) {
+    // console.log("openApplyModal called with:", lead, contextResumeName);
     // Ensure initialized
     initApplyModal();
 
@@ -1857,7 +2062,7 @@ async function confirmApplyToChat() {
     const selectedResume = resumeSelect.value;
     const instructions = instructionsEl.value.trim();
 
-    let selectedMode = 'cloud';
+    let selectedMode = 'cloud_run';
     document.getElementsByName('execution-mode').forEach(rad => {
         if (rad.checked) selectedMode = rad.value;
     });
@@ -1870,8 +2075,16 @@ async function confirmApplyToChat() {
     // Close Modal
     document.getElementById('apply-modal').style.display = 'none';
 
+    // Map mode to label
+    const modeLabels = {
+        'cloud_run': '☁️ Cloud Run',
+        'browser_use_cloud': '🌐 Browser Use Cloud',
+        'local': '💻 Local'
+    };
+    const modeLabel = modeLabels[selectedMode] || selectedMode;
+
     // TRIGGER THE AGENT directly via API
-    addMessage("user", `Apply to ${job.title} (${selectedMode === 'cloud' ? '☁️ Cloud' : '💻 Local'})`);
+    addMessage("user", `Apply to ${job.title} (${modeLabel})`);
     addMessage("model", `Starting Application...`);
 
     try {

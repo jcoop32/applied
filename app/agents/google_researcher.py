@@ -14,7 +14,9 @@ class GoogleResearcherAgent:
         self.client = genai.Client(api_key=api_key)
         self.api_key = api_key
         self.model_id = 'gemini-2.5-flash'
-        self.llm = ChatGoogle(model='gemini-2.5-flash', api_key=api_key, generation_config={"max_output_tokens": 8192})
+        # Try to pass max_output_tokens directly if supported, otherwise rely on defaults or model_kwargs
+        # Common Langchain wrapper accepts max_output_tokens
+        self.llm = ChatGoogle(model='gemini-2.5-flash', api_key=api_key, max_output_tokens=8192)
         self.seen_jobs: Set[str] = set()
         
         # Valid ATS Domains to target for "Verified" jobs
