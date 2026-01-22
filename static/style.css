@@ -773,26 +773,34 @@ body {
 
 /* Research Status Floater */
 .status-floater {
-    padding: 8px 15px;
-    background: rgba(30, 31, 32, 0.9);
-    border: 1px solid var(--border-color);
-    border-radius: 20px;
-    display: flex;
+    padding: 10px 15px;
+    background: rgba(40, 42, 44, 0.95); /* Match User Msg slightly */
+    border: 1px solid var(--accent-color);
+    border-radius: 12px;
+    display: flex; /* flex default */
     align-items: center;
     gap: 12px;
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
-    backdrop-filter: blur(5px);
-    transition: all 0.3s ease;
-    margin-left: auto;
-    /* Push to right if in flex container */
+    margin: 10px 0;
+    max-width: 80%;
+    align_self: flex-start; /* Left aliign like bot msg */
+}
+
+/* Specific Inline Helper if needed */
+.messages-container .status-floater {
+    margin-left: 45px; /* Offset for avatar alignment roughly */
+    animation: fadeIn 0.3s;
 }
 
 .status-text {
-    font-size: 0.85rem;
-    color: var(--accent-color);
+    font-size: 0.9rem;
+    color: var(--text-primary);
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 10px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
 }
 
 .cancel-btn {

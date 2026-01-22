@@ -13,7 +13,7 @@ from app.agents.applier import ApplierAgent
 
 logger = logging.getLogger(__name__)
 
-def update_research_status(user_id: int, resume_filename: str, status: str):
+def update_research_status(user_id: int, resume_filename: str, status: str, last_log: str = None):
     """
     Updates the 'research_status' in the user's profile_data.
     States: IDLE, QUEUED, SEARCHING, COMPLETED, FAILED
@@ -31,6 +31,9 @@ def update_research_status(user_id: int, resume_filename: str, status: str):
             "status": status,
             "updated_at": str(os.times())
         }
+        
+        if last_log:
+             current_data["research_status"][resume_filename]["last_log"] = last_log
 
         supabase_service.update_user_profile(user_id, {"profile_data": current_data})
 
@@ -55,15 +58,16 @@ async def check_cancellation(user_id: int, resume_filename: str):
 async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str, limit: int = 20, job_title: str = None, location: str = None, session_id: int = None):
     print(f"🕵️ Worker: Starting Research for {resume_filename} with limit {limit} (Type: Google)...")
     
-    # Broadcast Function helper (Switching to Supabase Realtime broadcast via Service in future, 
-    # but for now, we ensure we write critical logs to Chat History if not streaming locally)
+    # Broadcast Function helper
     async def log(msg, type="log"):
         if session_id:
             await log_stream_manager.broadcast(str(session_id), msg, type=type)
-            # Also save to DB for persistence if it's a major event
-            if type in ["complete", "error", "warning"]:
-                # We do NOT save every log to DB to avoid clutter, relying on Realtime
-                pass
+        
+        # Sync simple log to profile for non-session listeners (Dashboard UI)
+        # We only do this for major info logs to avoid DB Thrashing
+        if type in ["log", "complete", "error", "warning"]:
+             # Run in background to not block
+             asyncio.create_task(asyncio.to_thread(update_research_status, user_id, resume_filename, "SEARCHING", last_log=msg))
 
     await log(f"Starting research pipeline for {resume_filename}...")
     
@@ -87,17 +91,28 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
                     "session_id": session_id
                 }
                 headers = {"x-worker-secret": os.getenv("WORKER_SECRET", "")}
-                resp = await client.post(f"{cloud_url}/api/worker/task", json=payload, headers=headers, timeout=60.0)
+                
+                # TIMEOUT FIX: Increase to 300s (5 min) to match Cloud Run max
+                resp = await client.post(f"{cloud_url}/api/worker/task", json=payload, headers=headers, timeout=300.0)
+                
                 if resp.status_code != 200:
                     print(f"❌ Cloud Dispatch Failed: {resp.text}")
                     await log("Cloud dispatch failed, running locally...", type="warning")
                 else:
                     return # Successfully dispatched
+
+        except httpx.ReadTimeout:
+             # CRITICAL FIX: If it times out, it likely IS running on cloud, just taking long.
+             # DONT run locally, just log and exit.
+             print("⏳ Cloud Dispatch timed out waiting for response (Task likely running).")
+             await log("Task dispatched to cloud (running in background)...", type="log")
+             return
+
         except Exception as e:
              print(f"❌ Cloud Dispatch Error: {traceback.format_exc()}")
              await log(f"Cloud dispatch error: {e}, running locally...", type="warning")
 
-    update_research_status(user_id, resume_filename, "SEARCHING")
+    update_research_status(user_id, resume_filename, "SEARCHING", last_log="Starting local research...")
 
     try:
         # CANCELLATION CHECK

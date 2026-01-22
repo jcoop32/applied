@@ -837,11 +837,21 @@ async function updateResearchUI(profileData) {
     // Update Status Box / Cancel Button
     if (status === "SEARCHING" || status === "QUEUED") {
         statusBox.style.display = "flex";
+
+        let logText = (statusObj.last_log || "Finding jobs...").replace(/"/g, '&quot;');
+        // Truncate long logs
+        if (logText.length > 60) logText = logText.substring(0, 57) + "...";
+
         statusBox.innerHTML = `
-            <span class="status-text"><i class="fas fa-sync fa-spin"></i> Finding text...</span>
+            <div style="flex:1;">
+                <span class="status-text"><i class="fas fa-sync fa-spin"></i> <span id="live-log-text">${logText}</span></span>
+            </div>
             <button id="cancel-research-btn" class="cancel-btn">Stop</button>
         `;
         document.getElementById("cancel-research-btn").onclick = () => cancelResearch(resumeName);
+
+        // Auto-scroll if near bottom
+        scrollToBottom();
     } else {
         statusBox.style.display = "none";
     }
@@ -862,12 +872,19 @@ async function handleResearchCompletion(resumeName) {
 }
 
 function createStatusContainer() {
+    // POSITIONING FIX: Create it inside messages container so it flows with chat
+    const existing = document.getElementById("research-status-container");
+    if (existing) return existing;
+
     const container = document.createElement("div");
     container.id = "research-status-container";
-    container.className = "status-floater";
-    // Append to Header or Chat Area
-    const header = document.querySelector(".chat-header");
-    if (header) header.appendChild(container);
+    container.className = "status-floater inline-status"; // Added inline-status class
+
+    // Append to Messages Container at the bottom
+    const messages = document.getElementById("messages-container");
+    if (messages) {
+        messages.appendChild(container);
+    }
     return container;
 }
 
@@ -997,6 +1014,18 @@ async function confirmSearch() {
 
     addMessage("model", `Starting research...`);
 
+    // VISIBILITY FIX: Force UI to show "Searching" loop immediately before Fetch returns
+    // This provides instant feedback and prevents "lag" before the button appears.
+    const fakeProfile = {
+        primary_resume_name: resumeName,
+        profile_data: {
+            research_status: {
+                [resumeName]: { status: "SEARCHING", last_log: "Initializing..." }
+            }
+        }
+    };
+    updateResearchUI(fakeProfile);
+
     try {
         const payload = {
             resume_filename: resumeName,
@@ -1013,22 +1042,24 @@ async function confirmSearch() {
 
         if (res.ok) {
             const data = await res.json();
-            // Start Polling - REMOVED for Realtime
-            // pollResearchStatus(resumeName);
-
-            // Force UI update to show searching state immediately
+            // Force UI update to show searching state (redundant but safe)
             checkResearcherVisibility();
 
             if (data.session_id) {
-                addCancelButtonMessage(data.session_id);
+                // We rely on updateResearchUI now, so we might not need this if the status container does the job.
+                // But let's keep it if it adds a specific "Cancel" message block?
+                // Actually the user wants the cancel button INLINE.
+                // updateResearchUI handles the status box.
             }
         } else {
             console.error("Research start failed", await res.text());
             addMessage("model", "❌ Failed to start research.");
+            checkResearcherVisibility(); // Reset UI
         }
     } catch (e) {
         console.error("Error confirmSearch:", e);
         addMessage("model", "❌ Error starting research.");
+        checkResearcherVisibility(); // Reset UI
     }
 }
 
