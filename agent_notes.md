@@ -97,3 +97,23 @@
 **Fix Strategy:**
 1.  **Inject User ID:** Updated `app/api/chat.py` to explicitly add `user_id` to the `profile_blob` before passing it to `agent_runner`.
 2.  **Payload Update:** Updated `app/services/agent_runner.py` to extract `user_id` early and include it as a top-level field in the Cloud Run dispatch payload.
+
+## User Report: 2026-01-22 (Search Limit)
+**Error:** Agent returns fewer jobs than requested (e.g., 1 instead of 3).
+**Root Cause:** 'GoogleResearcherAgent' generated a fixed set of search queries and executed them once. If those queries yielded few valid results, the agent returned whatever it found without attempting to expand the search.
+**Fix Strategy:**
+1. Refactored 'GoogleResearcherAgent' to implement a **Search Loop**.
+2. Phase 1: Attempts strict "verified" queries (quoted titles).
+3. Phase 2: If 'limit' is not reached, attempts broader queries.
+4. The loop continues until the requested 'limit' is met or attempts are exhausted.
+
+## User Report: 2026-01-22 (Supabase 401)
+**Error:** GET | 401 | ... | /realtime/v1/websocket
+**Root Cause:**
+1. **Missing Auth Token:** The frontend `script.js` initializes the Supabase client anonymously (`createClient` without options), so it does not send the user's `access_token`.
+2. **RLS/Auth Mismatch:** If "Enable Anonymous Access" is disabled in Supabase, this anonymous connection is rejected (401). Even if accepted, the subscribed channel filters by `user_id`, which fails RLS for anonymous users.
+3. **Potential Key Issue:** The backend exposes `SUPABASE_KEY` as user anon key. If this is invalid/missing, connection fails.
+**Fix Strategy:**
+1. **Pass Token:** Update `script.js` to pass the stored JWT `token` in `createClient` options (`accessToken` or `global.headers`).
+2. **Verify Secret:** Ensure the backend `SECRET_KEY` matches Supabase's JWT Secret so the token is accepted.
+3. **Debug Config:** Add logging in `script.js` to verify `supabase_url` and `key` are loaded correctly.

@@ -57,7 +57,8 @@ async def handle_worker_task(
             limit=payload.limit,
             job_title=payload.job_title,
             location=payload.location,
-            session_id=payload.session_id
+            session_id=payload.session_id,
+            allow_dispatch=False
         )
         return {"status": "completed", "type": "research"}
 
@@ -118,7 +119,8 @@ async def handle_worker_task(
                  resume_filename=payload.resume_filename,
                  use_cloud=payload.use_cloud,
                  session_id=payload.session_id,
-                 instructions=payload.instructions
+                 instructions=payload.instructions,
+                 allow_dispatch=False
              )
              return {"status": "completed", "type": "apply"}
              

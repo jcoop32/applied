@@ -27,13 +27,25 @@ def update_research_status(user_id: int, resume_filename: str, status: str, last
         if "research_status" not in current_data:
             current_data["research_status"] = {}
 
-        current_data["research_status"][resume_filename] = {
-            "status": status,
-            "updated_at": str(os.times())
-        }
-        
-        if last_log:
-             current_data["research_status"][resume_filename]["last_log"] = last_log
+        # RACE CONDITION FIX: Do not overwrite a FINAL state (COMPLETED/FAILED/CANCELLED) with an active state (SEARCHING)
+        # This happens if a delayed log broadcast finishes AFTER the main thread has set completion.
+        current_status_entry = current_data["research_status"].get(resume_filename, {})
+        current_status_val = current_status_entry.get("status", "IDLE")
+
+        final_states = ["COMPLETED", "FAILED", "CANCELLED", "CANCEL_REQUESTED"]
+        if current_status_val in final_states and status not in final_states:
+             # Just update the log, NOT the status
+             current_data["research_status"][resume_filename]["last_log"] = last_log or current_status_entry.get("last_log")
+             # Keep existing status
+             current_data["research_status"][resume_filename]["updated_at"] = str(os.times())
+        else:
+            # Normal Update
+            current_data["research_status"][resume_filename] = {
+                "status": status,
+                "updated_at": str(os.times())
+            }
+            if last_log:
+                current_data["research_status"][resume_filename]["last_log"] = last_log
 
         supabase_service.update_user_profile(user_id, {"profile_data": current_data})
 
@@ -55,7 +67,7 @@ async def check_cancellation(user_id: int, resume_filename: str):
         pass
     return False
 
-async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str, limit: int = 20, job_title: str = None, location: str = None, session_id: int = None):
+async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str, limit: int = 20, job_title: str = None, location: str = None, session_id: int = None, allow_dispatch: bool = True):
     print(f"🕵️ Worker: Starting Research for {resume_filename} with limit {limit} (Type: Google)...")
     
     # Broadcast Function helper
@@ -74,7 +86,7 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
     
     # Cloud Dispatch Check
     cloud_url = os.getenv("CLOUD_RUN_URL")
-    if cloud_url and not os.getenv("IS_CLOUD_WORKER"):
+    if allow_dispatch and cloud_url and not os.getenv("IS_CLOUD_WORKER"):
         import httpx
         print(f"🚀 Dispatching Research task to Cloud Worker: {cloud_url}")
         await log("Dispatching to Cloud Worker...")
@@ -187,7 +199,7 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
             return await check_cancellation(user_id, resume_filename)
              
         # We use the DYNAMIC profile_blob here
-        leads = await researcher.gather_leads(profile_blob, limit=limit, job_title=job_title, location=location, should_stop_callback=cancel_check_cb)
+        leads = await researcher.gather_leads(profile_blob, limit=limit, job_title=job_title, location=location, should_stop_callback=cancel_check_cb, log_callback=log)
 
         # Prefix query_source for UI identification
         prefix = "GOOGLE"
@@ -250,7 +262,7 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
              print(f"❌ Failed to final update status: {status_err}")
 
 
-async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, api_key: str, resume_filename: str = None, execution_mode: str = "local", session_id: int = None, instructions: str = None):
+async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, api_key: str, resume_filename: str = None, execution_mode: str = "local", session_id: int = None, instructions: str = None, allow_dispatch: bool = True):
     print(f"🚀 Worker: Applying to {job_url} ...")
     
     async def log(msg, type="log"):
@@ -267,7 +279,7 @@ async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, a
     cloud_url = os.getenv("CLOUD_RUN_URL")
     # Only dispatch if we are not ALREADY in the cloud worker (prevent infinite loop if env vars are confusing)
     # But user_profile needs to be passed carefully.
-    if cloud_url and not os.getenv("IS_CLOUD_WORKER") and execution_mode == 'cloud_run':
+    if allow_dispatch and cloud_url and not os.getenv("IS_CLOUD_WORKER") and execution_mode == 'cloud_run':
         import httpx
         print(f"🚀 Dispatching Applier task to Cloud Worker: {cloud_url}")
         await log("Dispatching Applier to Cloud Worker...")
