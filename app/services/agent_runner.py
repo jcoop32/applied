@@ -18,7 +18,7 @@ def update_research_status(user_id: int, resume_filename: str, status: str):
     States: IDLE, QUEUED, SEARCHING, COMPLETED, FAILED
     """
     try:
-        response = supabase_service.client.table("users").select("profile_data").eq("id", user_id).execute()
+        response = supabase_service.client.table("profiles").select("profile_data").eq("user_id", user_id).execute()
         if not response.data:
             return
 
@@ -43,6 +43,38 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
         supabase_service.save_chat_message(session_id, "model", f"fe0f Starting Research for **{resume_filename}**...")
         await log_stream_manager.broadcast(str(session_id), f"Starting research pipeline for {resume_filename}...")
     
+    # Cloud Dispatch Check
+    cloud_url = os.getenv("CLOUD_RUN_URL")
+    if cloud_url and not os.getenv("IS_CLOUD_WORKER"):
+        import httpx
+        print(f"🚀 Dispatching Research task to Cloud Worker: {cloud_url}")
+        if session_id: await log_stream_manager.broadcast(str(session_id), "Dispatching to Cloud Worker...")
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                payload = {
+                    "type": "research",
+                    "user_id": user_id,
+                    "resume_filename": resume_filename,
+                    "api_key": api_key,
+                    "limit": limit,
+                    "job_title": job_title,
+                    "location": location,
+                    "session_id": session_id
+                }
+                headers = {"x-worker-secret": os.getenv("WORKER_SECRET", "")}
+                resp = await client.post(f"{cloud_url}/api/worker/task", json=payload, headers=headers, timeout=10.0)
+                if resp.status_code != 200:
+                    print(f"❌ Cloud Dispatch Failed: {resp.text}")
+                    # Fallthrough to local if dispatch fails? Or just return?
+                    # Let's fallthrough to local execution as backup
+                    if session_id: await log_stream_manager.broadcast(str(session_id), "Cloud dispatch failed, running locally...", type="warning")
+                else:
+                    return # Successfully dispatched
+        except Exception as e:
+             print(f"❌ Cloud Dispatch Error: {e}")
+             if session_id: await log_stream_manager.broadcast(str(session_id), f"Cloud dispatch error: {e}, running locally...", type="warning")
+
     update_research_status(user_id, resume_filename, "SEARCHING")
 
     try:
@@ -169,7 +201,40 @@ async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, a
     if session_id:
         supabase_service.save_chat_message(session_id, "model", f"🚀 Starting Application to **{job_url}**...")
         await log_stream_manager.broadcast(str(session_id), f"Initializing application agent for: {job_url}")
-    
+
+    # Cloud Dispatch Check
+    cloud_url = os.getenv("CLOUD_RUN_URL")
+    # Only dispatch if we are not ALREADY in the cloud worker (prevent infinite loop if env vars are confusing)
+    # But user_profile needs to be passed carefully.
+    if cloud_url and not os.getenv("IS_CLOUD_WORKER") and use_cloud:
+        import httpx
+        print(f"🚀 Dispatching Applier task to Cloud Worker: {cloud_url}")
+        if session_id: await log_stream_manager.broadcast(str(session_id), "Dispatching Applier to Cloud Worker...")
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                payload = {
+                    "type": "apply",
+                    "job_url": job_url,
+                    "resume_path": resume_path, # Note: This path is local, we might need to handle this differently for cloud. 
+                    # actually worker endpoint logic below handles download. We pass resume_filename instead of path if possible?
+                    # The worker needs to re-download. So we should pass resume_filename and user_id in payload, NOT local path.
+                    "user_profile": user_profile,
+                    "api_key": api_key,
+                    "resume_filename": resume_filename,
+                    "use_cloud": True, # Force true on worker
+                    "session_id": session_id,
+                    "instructions": instructions
+                }
+                headers = {"x-worker-secret": os.getenv("WORKER_SECRET", "")}
+                resp = await client.post(f"{cloud_url}/api/worker/task", json=payload, headers=headers, timeout=10.0)
+                if resp.status_code != 200:
+                    print(f"❌ Cloud Dispatch Failed: {resp.text}")
+                else:
+                    return # Successfully dispatched
+        except Exception as e:
+             print(f"❌ Cloud Dispatch Error: {e}")
+
     # Resolve Lead ID for status updates
     user_id = user_profile.get("user_id") or user_profile.get("id")
     

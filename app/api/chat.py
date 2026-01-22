@@ -81,7 +81,8 @@ async def handle_agent_action(action, user_id, session_id, available_resumes, cu
         if resume_filename not in available_resumes:
            pass # logging handled in agent text usually
 
-        from app.services.agent_runner import run_research_pipeline, update_research_status
+    try:
+        if action["type"] == "research":
         from app.services.github import dispatch_github_action
         
         update_research_status(user_id, resume_filename, "SEARCHING")
