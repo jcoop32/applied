@@ -135,9 +135,17 @@ async def handle_agent_action(action, user_id, session_id, available_resumes, cu
                     return "\n\nI found the job but I don't know which resume to use. Please specify a resume or set a primary one in your Profile."
 
             extra_instructions = args.get("extra_instructions")
-            mode = args.get("mode", "cloud")
-            use_cloud = (mode == "cloud")
-            
+            # Map frontend mode to execution_mode
+            # 'cloud' -> 'cloud_run' (Google Cloud Run)
+            # 'browser_use' -> 'browser_use_cloud' (Local Controller + Managed Browser)
+            # 'local' -> 'local' (Docker/Local)
+            if mode == "cloud":
+                execution_mode = "cloud_run" 
+            elif mode == "browser_use":
+                execution_mode = "browser_use_cloud"
+            else:
+                execution_mode = "local"
+
             from app.services.agent_runner import run_applier_task
             
             user_data = supabase_service.get_user_by_email(current_user['email'])
@@ -159,7 +167,7 @@ async def handle_agent_action(action, user_id, session_id, available_resumes, cu
                     with open(tmp_path, "wb") as f:
                         f.write(file_bytes)
                     
-                    await run_applier_task(job_url, tmp_path, profile_blob, api_key, resume_filename=resume_filename, use_cloud=use_cloud, session_id=session_id)
+                    await run_applier_task(job_url, tmp_path, profile_blob, api_key, resume_filename=resume_filename, execution_mode=execution_mode, session_id=session_id)
                     
                     if os.path.exists(tmp_path):
                         os.remove(tmp_path)

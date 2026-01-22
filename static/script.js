@@ -1272,17 +1272,21 @@ function showApplyModeModal(url, title) {
                 </div>
                 <div class="modal-body" style="text-align: center; padding: 20px;">
                     <p style="margin-bottom: 20px;">How would you like to run the Applier Agent for <strong>${title}</strong>?</p>
-                    <div style="display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
-                        <button id="mode-local-btn" class="chip" style="padding: 15px 25px; font-size: 1rem;">
-                            💻 Run Locally
+                    <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+                        <button id="mode-local-btn" class="chip" style="padding: 12px 20px; font-size: 0.9rem;">
+                            💻 Local
                         </button>
-                        <button id="mode-cloud-btn" class="chip" style="padding: 15px 25px; font-size: 1rem; background: linear-gradient(135deg, #667eea, #764ba2);">
-                            ☁️ Run in Cloud
+                        <button id="mode-browser-use-btn" class="chip" style="padding: 12px 20px; font-size: 0.9rem; background: linear-gradient(135deg, #FF8008, #FFC837); color: #000;">
+                            🌐 Browser Use
+                        </button>
+                        <button id="mode-cloud-btn" class="chip" style="padding: 12px 20px; font-size: 0.9rem; background: linear-gradient(135deg, #667eea, #764ba2);">
+                            ☁️ Google Cloud
                         </button>
                     </div>
                     <div style="margin-top: 15px; font-size: 0.85rem; color: var(--text-secondary); text-align: left; line-height: 1.4;">
-                        <p style="margin-bottom: 5px;"><i class="fas fa-cloud"></i> <strong>Cloud:</strong> Runs on Google Cloud (Recommended). Watch live in chat.</p>
-                        <p style="margin: 0;"><i class="fas fa-desktop"></i> <strong>Local:</strong> Runs visibly on your machine.</p>
+                        <p style="margin-bottom: 5px;"><i class="fas fa-desktop"></i> <strong>Local:</strong> Runs on your machine (Docker/Terminal).</p>
+                        <p style="margin-bottom: 5px;"><i class="fas fa-globe"></i> <strong>Browser Use:</strong> Managed Cloud Browser (Stealthy).</p>
+                        <p style="margin: 0;"><i class="fas fa-cloud"></i> <strong>Google Cloud:</strong> Fully autonomous background worker.</p>
                     </div>
                 </div>
             </div>
@@ -1294,6 +1298,7 @@ function showApplyModeModal(url, title) {
         modal.onclick = (e) => { if (e.target === modal) close(); };
 
         modal.querySelector('#mode-local-btn').onclick = () => { modal.remove(); resolve('local'); };
+        modal.querySelector('#mode-browser-use-btn').onclick = () => { modal.remove(); resolve('browser_use'); };
         modal.querySelector('#mode-cloud-btn').onclick = () => { modal.remove(); resolve('cloud'); };
     });
 }

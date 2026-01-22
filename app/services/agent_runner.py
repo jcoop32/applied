@@ -265,13 +265,25 @@ async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, a
                     "instructions": instructions
                 }
                 headers = {"x-worker-secret": os.getenv("WORKER_SECRET", "")}
-                resp = await client.post(f"{cloud_url}/api/worker/task", json=payload, headers=headers, timeout=60.0)
+                # Increase timeout to 5 minutes to allow for full execution or at least long enough for initial steps
+                resp = await client.post(f"{cloud_url}/api/worker/task", json=payload, headers=headers, timeout=300.0)
                 if resp.status_code != 200:
                     print(f"❌ Cloud Dispatch Failed: {resp.text}")
+                    # If user explicitly asked for Cloud, we should probably stop or notify rather than silently running local
+                    # But for robustness, we can return Error status
+                    await log(f"❌ Cloud Execution Failed (Status {resp.status_code}). Check Cloud Run logs.", type="error")
+                    return "FAILED_DISPATCH"
                 else:
                     return # Successfully dispatched
         except Exception as e:
              print(f"❌ Cloud Dispatch Error: {traceback.format_exc()}")
+             await log(f"❌ Cloud Dispatch Error: {e}", type="error")
+             return "FAILED_DISPATCH"
+
+    # If we are here, we are running LOCALLY (or we are the worker)
+    if execution_mode == 'cloud_run':
+        # If we were supposed to be Cloud Run but fell through (unlikely with above returns), stop.
+        return "FAILED_DISPATCH"
 
     # Resolve Lead ID for status updates
     user_id = user_profile.get("user_id") or user_profile.get("id")
@@ -285,7 +297,7 @@ async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, a
             print(f"📋 Found Lead ID: {lead_id}")
             # Use specific ID update
             # Pass invalidation metadata if we have it
-            supabase_service.update_lead_status(lead_id, "APPLYING", user_id=user_id, resume_filename=resume_filename)
+            supabase_service.update_lead_status(lead_id, "APPLYING", user_id=user_id, resume_filename=resume_filename, status_msg="Running Locally")
         else:
             print("⚠️ Could not find existing lead for this URL. Status updates will be skipped.")
     else:
@@ -295,6 +307,9 @@ async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, a
         # Detect environment for headless mode
         is_headless = os.getenv("HEADLESS", "false").lower() == "true"
         applier = ApplierAgent(api_key=api_key, headless=is_headless)
+        
+        # Determine Managed Browser (Browser Use Cloud) usage
+        # STRICTLY enable only if requested via execution_mode
         if execution_mode == 'browser_use_cloud':
             use_managed_browser = True
         else:
