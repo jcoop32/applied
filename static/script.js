@@ -1452,6 +1452,7 @@ async function selectResume(filename) {
 
 // --- Jobs Page Logic ---
 async function initJobsPage() {
+    initInfoModal(); // Initialize modal listeners
     const resumeSelect = document.getElementById("resume-filter");
     const refreshBtn = document.getElementById("refresh-jobs-btn");
 
@@ -1586,21 +1587,28 @@ async function loadJobs(resumeName) {
                 <div class="job-meta">
                     <span class="match-score">${lead.match_score}% Match</span>
                     <span class="status-pill ${statusClass}">${lead.status}</span>
-                    <div class="actions">
-                        <button class="apply-chat-btn" data-lead-id="${lead.id}" style="padding: 6px 12px; font-size: 0.8rem; background: var(--accent-color); color: #000; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
+                    <div class="actions" style="display: flex; gap: 10px; align-items: center;">
+                        <a href="${lead.url}" target="_blank" style="color: var(--text-secondary); font-size: 1.1rem; padding: 4px;" title="View Job">
+                            <i class="fas fa-external-link-alt"></i>
+                        </a>
+                        <button class="info-btn" style="background: none; border: none; color: var(--text-secondary); font-size: 1.1rem; cursor: pointer; padding: 4px;" title="Match Reasoning">
+                            <i class="fas fa-info-circle"></i>
+                        </button>
+                        <button class="delete-btn" style="background: none; border: none; color: #ff6b6b; font-size: 1.1rem; cursor: pointer; padding: 4px;" title="Delete Lead">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                        <button class="apply-chat-btn" data-lead-id="${lead.id}" style="padding: 6px 16px; font-size: 0.8rem; background: var(--accent-color); color: #000; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: 5px;">
                             Apply <i class="fas fa-paper-plane"></i>
                         </button>
                     </div>
                 </div>
             `;
 
-            // Add click handler for Apply button - Explicitly using addEventListener
+            // Add click handler for Apply button
             const applyBtn = div.querySelector('.apply-chat-btn');
             if (applyBtn) {
-                // Ensure we clear any old listeners if this was re-rendered (fresh element anyway)
                 applyBtn.addEventListener('click', function (e) {
                     e.preventDefault();
-                    // console.log("Clicked Apply for:", lead.title, "Resume:", resumeName);
                     try {
                         openApplyModal(lead, resumeName);
                     } catch (err) {
@@ -1609,6 +1617,23 @@ async function loadJobs(resumeName) {
                     }
                 });
             }
+
+            // Info Button
+            const infoBtn = div.querySelector('.info-btn');
+            if (infoBtn) {
+                infoBtn.addEventListener('click', () => openInfoModal(lead));
+            }
+
+            // Delete Button
+            const deleteBtn = div.querySelector('.delete-btn');
+            if (deleteBtn) {
+                deleteBtn.addEventListener('click', () => {
+                    if (confirm(`Are you sure you want to delete "${lead.title}"?`)) {
+                        deleteLead(lead.id, div);
+                    }
+                });
+            }
+
             container.appendChild(div);
         });
 
@@ -1616,6 +1641,61 @@ async function loadJobs(resumeName) {
         console.error("Error loading jobs", e);
         container.innerHTML = "<p style='text-align:center;'>Error loading leads.</p>";
     }
+}
+
+async function deleteLead(leadId, rowElement) {
+    try {
+        const res = await authFetch(`${API_BASE}/leads/${leadId}`, {
+            method: "DELETE"
+        });
+        if (res.ok) {
+            rowElement.remove();
+            // Optional: Show toast
+        } else {
+            alert("Failed to delete lead.");
+        }
+    } catch (e) {
+        console.error("Error deleting lead:", e);
+        alert("Error deleting lead.");
+    }
+}
+
+function initInfoModal() {
+    const modal = document.getElementById("info-modal");
+    const closeBtn = document.querySelector(".close-info-modal");
+
+    if (closeBtn && modal) {
+        closeBtn.onclick = () => modal.style.display = "none";
+    }
+
+    if (modal) {
+        window.addEventListener("click", (event) => {
+            if (event.target == modal) {
+                modal.style.display = "none";
+            }
+        });
+    }
+}
+
+function openInfoModal(lead) {
+    const modal = document.getElementById("info-modal");
+    const content = document.getElementById("info-modal-content");
+
+    if (!modal || !content) return;
+
+    // Format reasoning with basic markdown-like rendering if needed, 
+    // but for now just text or simple replacement
+    let reasoning = lead.match_reason || "No reasoning available.";
+    // Simple bolding of sections usually returned by LLM
+    reasoning = reasoning.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    reasoning = reasoning.replace(/\n/g, '<br>');
+
+    content.innerHTML = `
+        <h4 style="color: var(--accent-color); margin-top:0;">${lead.title} @ ${lead.company}</h4>
+        <p>${reasoning}</p>
+    `;
+
+    modal.style.display = "block";
 }
 
 // ==========================================

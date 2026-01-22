@@ -39,6 +39,17 @@ async def get_leads(
         "resume_context": resume
     }
 
+@router.delete("/{lead_id}")
+async def delete_lead(lead_id: int, current_user: dict = Depends(get_current_user)):
+    """
+    Delete a job lead.
+    """
+    user_id = current_user['id']
+    success = supabase_service.delete_lead(lead_id, user_id)
+    if not success:
+         raise HTTPException(status_code=500, detail="Failed to delete lead")
+    return {"status": "success", "message": f"Lead {lead_id} deleted."}
+
 @router.get("/counts")
 async def get_lead_counts(current_user: dict = Depends(get_current_user)):
     """
