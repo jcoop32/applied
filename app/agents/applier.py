@@ -4,6 +4,7 @@ import asyncio
 import datetime
 import shutil
 import shutil
+import logging
 import requests
 from bs4 import BeautifulSoup
 from typing import Dict, Any, Optional
@@ -12,6 +13,7 @@ from browser_use import Agent, Browser
 from browser_use.llm import ChatGoogle
 from app.utils.password_generator import generate_strong_password
 from app.services.supabase_client import supabase_service
+from app.services.log_stream import log_stream_manager
 
 class ApplierAgent:
     def __init__(self, api_key: str, headless: bool = False):
@@ -165,8 +167,9 @@ class ApplierAgent:
                     # We raise an error or return the original job_url (which might be GetWork, better than Adzuna?)
                     # But GetWork is also not an ATS. 
                     # Let's return the extracted_url but log a CRITICAL warning, OR raise an error.
-                    # Best approach: Raise error to stop the agent from wasting money applying to Adzuna.
-                    raise ValueError(f"Could not bypass aggregator ({final_domain}). Manual intervention required.")
+                    # Best approach: Return the extracted URL and hope the browser can handle it or the user sees the output.
+                    print(f"⚠️ Warning: Could not fully bypass aggregator ({final_domain}). Proceeding with best match.")
+                    return extracted_url
 
                 return extracted_url
 
@@ -419,10 +422,11 @@ class ApplierAgent:
 
         # Ensure browser has some security options disabled to allow file access if needed?
         # Usually standard config is fine.
-        if use_managed_browser or os.getenv("BROWSER_USE_API_KEY"):
-            print("☁️ Using Browser Use Cloud for enhanced stealth")
-            # Cloud browser does not support 'headless' arg in the same way, usually handled remote
-        if use_managed_browser or os.getenv("BROWSER_USE_API_KEY"):
+        # Ensure browser has some security options disabled to allow file access if needed?
+        # Usually standard config is fine.
+        
+        # FIX: Strict check for managed browser + API key. Do NOT auto-enable just because key exists.
+        if use_managed_browser and os.getenv("BROWSER_USE_API_KEY"):
             print("☁️ Using Browser Use Cloud for enhanced stealth")
             # Cloud browser does not support 'headless' arg in the same way, usually handled remote
             browser = Browser(use_cloud=True)
@@ -434,7 +438,11 @@ class ApplierAgent:
                     session_url = f"https://cloud.browser-use.com/sessions/{b_session_id}"
                     print(f"🔗 Browser Use Session: {session_url}")
                     if session_id:
-                         supabase_service.save_chat_message(session_id, "model", f"🔗 **Watch Live on Browser Use Cloud**: [Click Here]({session_url})")
+                         # BOLD and Highlighted as requested
+                         link_msg = f"## 🔗 **Watch Live on Browser Use Cloud**: [**Click Here to View Agent**]({session_url})"
+                         supabase_service.save_chat_message(session_id, "model", link_msg)
+                         # BROADCAST to UI immediately
+                         await log_stream_manager.broadcast(str(session_id), link_msg, type="log")
             except Exception as e:
                 print(f"could not extract session url: {e}")
         else:
@@ -477,6 +485,35 @@ class ApplierAgent:
                 supabase_service.save_chat_message(session_id, "model", f"🔄 {status}")
 
             return "Status updated"
+
+            return "Status updated"
+
+        # --- LOGGING SETUP ---
+        log_handler = None
+        if session_id:
+            try:
+                # Custom Handler to stream logs to frontend
+                class BroadcastLogHandler(logging.Handler):
+                    def __init__(self, s_id):
+                        super().__init__()
+                        self.session_id = str(s_id)
+                    def emit(self, record):
+                        try:
+                            msg = self.format(record)
+                            asyncio.create_task(log_stream_manager.broadcast(self.session_id, msg, type="log"))
+                        except Exception:
+                            self.handleError(record)
+
+                log_handler = BroadcastLogHandler(session_id)
+                formatter = logging.Formatter('%(levelname)s [%(name)s] %(message)s')
+                log_handler.setFormatter(formatter)
+                
+                # Attach to browser_use logger
+                logging.getLogger("browser_use").addHandler(log_handler)
+                # Also attach to root/agent if needed, ensuring we don't duplicate too much
+                # logging.getLogger().addHandler(log_handler) # Too noisy
+            except Exception as e:
+                print(f"⚠️ Failed to attach log handler: {e}")
 
         try:
             # Initialize Controller
@@ -559,6 +596,11 @@ class ApplierAgent:
         except Exception as e:
             return f"Error: {e}"
         finally:
+            if log_handler:
+                try:
+                    logging.getLogger("browser_use").removeHandler(log_handler)
+                except: pass
+            
             try:
                 if hasattr(browser, 'close'):
                     await browser.close()

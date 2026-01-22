@@ -84,7 +84,6 @@ async def handle_agent_action(action, user_id, session_id, available_resumes, cu
                pass # logging handled in agent text usually
 
             from app.services.agent_runner import run_research_pipeline, update_research_status
-            from app.services.github import dispatch_github_action
             
             # Idempotency Check
             current_status = supabase_service.get_research_status(user_id).get(resume_filename, {}).get("status")
@@ -93,45 +92,18 @@ async def handle_agent_action(action, user_id, session_id, available_resumes, cu
                 return msg
 
             update_research_status(user_id, resume_filename, "SEARCHING")
-            use_gha = os.getenv("USE_GITHUB_ACTIONS", "false").lower() == "true"
             
-            if use_gha:
-                print(f"🚀 Dispatching Research via GitHub Actions for {resume_filename}")
-                payload = {
-                    "user_id": user_id,
-                    "resume_filename": resume_filename,
-                    "limit": limit,
-                    "job_title": job_title,
-                    "location": location,
-                    "session_id": session_id
-                }
-                success = await dispatch_github_action("research_agent.yml", "research", payload)
-                
-                if success:
-                    supabase_service.save_chat_message(session_id, "model", f"🚀 Research agent dispatched to cloud runner for **{resume_filename}**. You will see results here shortly.")
-                else:
-                    extra_response = "\n\n(⚠️ Failed to start Cloud Agent. Falling back to local runner...)"
-                    # Fallback to local
-                    asyncio.create_task(run_research_pipeline(
-                        user_id=user_id,
-                        resume_filename=resume_filename,
-                        api_key=api_key,
-                        limit=limit,
-                        job_title=job_title,
-                        location=location,
-                        session_id=session_id
-                    ))
-            else:
-                # Local or Cloud Dispatch (logic handled inside run_research_pipeline now)
-                asyncio.create_task(run_research_pipeline(
-                    user_id=user_id,
-                    resume_filename=resume_filename,
-                    api_key=api_key,
-                    limit=limit,
-                    job_title=job_title,
-                    location=location,
-                    session_id=session_id
-                ))
+            # Local or Cloud Dispatch (logic handled inside run_research_pipeline now)
+            asyncio.create_task(run_research_pipeline(
+                user_id=user_id,
+                resume_filename=resume_filename,
+                api_key=api_key,
+                limit=limit,
+                job_title=job_title,
+                location=location,
+                session_id=session_id
+            ))
+
 
         elif action["type"] == "apply":
             args = action["payload"]

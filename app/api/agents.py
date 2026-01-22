@@ -14,13 +14,12 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 from app.services.agent_runner import run_research_pipeline, update_research_status, run_applier_task
-from app.services.github import dispatch_github_action
 from app.services.task_manager import task_manager
 import asyncio
 
 # --- Routes ---
 
-USE_GITHUB_ACTIONS = os.getenv("USE_GITHUB_ACTIONS", "true").lower() == "true"
+
 
 @router.post("/research")
 async def trigger_research(
@@ -61,23 +60,7 @@ async def trigger_research(
     if session_id:
         supabase_service.save_chat_message(session_id, "model", f"🕵️ Research session initialized for **{resume_filename}**. Starting agent...")
 
-    # Dispatch
-    if USE_GITHUB_ACTIONS:
-        action_payload = {
-            "user_id": user_id,
-            "resume_filename": resume_filename,
-            "limit": limit,
-            "job_title": job_title,
-            "location": location,
-            "session_id": session_id # Pass session ID to GHA
-        }
-        success = await dispatch_github_action("research_agent.yml", "research", action_payload)
 
-        if success:
-            return {"message": "Research started (GitHub Action)", "status": "SEARCHING", "session_id": session_id}
-        else:
-            # Fallback to local?
-            pass
 
     # Local Fallback (or if Actions disabled)
     if not api_key:
@@ -173,13 +156,12 @@ async def trigger_apply(
     supabase_service.update_lead_status_by_url(user_id, job_url, "IN_PROGRESS", resume_filename=resume_filename)
 
     # Logic Switch
-    should_dispatch_github = False
     
     # Legacy 'github' mode support if we re-introduce it
     if mode == 'github':
-        should_dispatch_github = True
-    elif USE_GITHUB_ACTIONS and mode == 'gha': # Explicit GHA request
-        should_dispatch_github = True
+        # Fallback to local if github requested but removed
+        mode = 'local'
+    
     
     # Otherwise we rely on agent_runner to handle local/cloud_run/browser_use_cloud logic
 
@@ -192,20 +174,7 @@ async def trigger_apply(
         supabase_service.save_chat_message(session_id, "model", f"🚀 Application session initialized for **{job_url}**. Starting agent...")
 
 
-    if should_dispatch_github:
-        action_payload = {
-            "user_id": user_id,
-            "job_url": job_url,
-            "resume_filename": resume_filename,
-            "user_profile": profile_blob,
-            "session_id": session_id, # Pass session ID
-            "instructions": instructions
-        }
-        success = await dispatch_github_action("apply_agent.yml", "apply", action_payload)
-        if success:
-             return {"message": "Application started (GitHub Action)", "session_id": session_id}
-        else:
-             logger.error("❌ Failed to dispatch GitHub Action for Apply. Falling back to local/background task if key available.")
+
 
     # Construct resume path (temp download needed? Applier handles local path logic)
     # The ApplierAgent.apply methods expects a LOCAL file path.

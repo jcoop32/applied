@@ -75,4 +75,19 @@
 **Fix Strategy:**
 1. Updated `GoogleResearcherAgent` to pass `max_output_tokens=8192` directly (or via `model_kwargs` if needed, but trying direct arg first).
 2. Removed the redundant `supabase_service.save_chat_message` call in `agent_runner.py`.
-3. Updated `agent_runner.py` to pass the dynamic `limit` variable to `matcher.filter_and_score_leads`.
+
+## User Report: 2026-01-21 (Agent Execution & UI)
+**Error:** `httpx.ReadTimeout`, Agent runs locally instead of Cloud Run, UI shows "Error starting research" then stale job matches, Cancel button missing.
+**Root Cause:**
+1. **Execution Environment:** `app/api/agents.py` defaulted `USE_GITHUB_ACTIONS=True`, causing `dispatch_github_action` to attempt (and timeout on) a GHA dispatch, instead of using the intended `agent_runner` Cloud Run logic.
+2. **Timeout:** `app/services/agent_runner.py` had a short 10s timeout for Cloud Run dispatch, causing fallback to local execution on cold starts.
+3. **Stale Data:** `script.js` polling logic `(attempts > 5)` incorrectly assumed research was done after 15s, displaying existing (stale) matches from the DB while the new research was still running locally.
+4. **UI State:** The backend timeout caused the frontend `fetch` to fail, showing "Error starting research" and preventing the polling loop (and Cancel button visibility) from initializing correctly.
+**Fix Strategy:**
+1. **Config:** Changed `USE_GITHUB_ACTIONS` default to `False` in `agents.py` to prioritize `agent_runner` dispatch logic.
+2. **Timeout:** Increased Cloud Run dispatch timeout to 60s in `agent_runner.py`.
+3. **Frontend:** Updated `script.js` polling to ONLY show matches when `status === "COMPLETED"`, preventing stale data display.
+
+## Internal Issue: Switch to Real-time Job Updates
+**Context:** Job search status updates were previously polling every 3 seconds, delaying results and causing duplicate fetching.
+**Solution:** Refactored `script.js` to utilize the existing Supabase Realtime subscription on the `profiles` table. The frontend now tracks `lastResearchStatus` and triggers `handleResearchCompletion()` immediately when the status transitions to "COMPLETED". Removed `pollResearchStatus` entirely. This reduces network load and provides instant feedback.

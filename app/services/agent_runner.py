@@ -87,7 +87,7 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
                     "session_id": session_id
                 }
                 headers = {"x-worker-secret": os.getenv("WORKER_SECRET", "")}
-                resp = await client.post(f"{cloud_url}/api/worker/task", json=payload, headers=headers, timeout=10.0)
+                resp = await client.post(f"{cloud_url}/api/worker/task", json=payload, headers=headers, timeout=60.0)
                 if resp.status_code != 200:
                     print(f"❌ Cloud Dispatch Failed: {resp.text}")
                     await log("Cloud dispatch failed, running locally...", type="warning")
@@ -265,7 +265,7 @@ async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, a
                     "instructions": instructions
                 }
                 headers = {"x-worker-secret": os.getenv("WORKER_SECRET", "")}
-                resp = await client.post(f"{cloud_url}/api/worker/task", json=payload, headers=headers, timeout=10.0)
+                resp = await client.post(f"{cloud_url}/api/worker/task", json=payload, headers=headers, timeout=60.0)
                 if resp.status_code != 200:
                     print(f"❌ Cloud Dispatch Failed: {resp.text}")
                 else:
@@ -293,7 +293,7 @@ async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, a
 
     try:
         # Detect environment for headless mode
-        is_headless = os.getenv("HEADLESS", "false").lower() == "true" or os.getenv("GITHUB_ACTIONS") == "true"
+        is_headless = os.getenv("HEADLESS", "false").lower() == "true"
         applier = ApplierAgent(api_key=api_key, headless=is_headless)
         if execution_mode == 'browser_use_cloud':
             use_managed_browser = True

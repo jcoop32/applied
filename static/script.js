@@ -36,6 +36,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
 const API_BASE = "/api";
 let currentUser = null;
+let lastResearchStatus = {}; // Cache to track transitions
 
 // Helper: Authenticated Fetch
 async function authFetch(url, options = {}) {
@@ -89,9 +90,19 @@ function initChatPage() {
 
     // Load Sessions, then restore last active session
     loadSessions().then(() => {
-        const savedSessionId = localStorage.getItem('currentChatSessionId');
-        if (savedSessionId) {
-            loadSession(savedSessionId);
+        // Check URL first
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlSessionId = urlParams.get('session_id');
+
+        if (urlSessionId) {
+            loadSession(urlSessionId);
+            // Clean URL
+            window.history.replaceState({}, document.title, "/");
+        } else {
+            const savedSessionId = localStorage.getItem('currentChatSessionId');
+            if (savedSessionId) {
+                loadSession(savedSessionId);
+            }
         }
     });
 
@@ -802,6 +813,14 @@ async function updateResearchUI(profileData) {
     const statusObj = (pArgs.research_status || {})[resumeName] || {};
     const status = statusObj.status || "IDLE";
 
+    // Check for transition to COMPLETED
+    const lastStatus = lastResearchStatus[resumeName];
+    if (status === "COMPLETED" && lastStatus && lastStatus !== "COMPLETED") {
+        console.log("Realtime: Research Completed for", resumeName);
+        handleResearchCompletion(resumeName);
+    }
+    lastResearchStatus[resumeName] = status;
+
     // Reset Buttons text
     startBtns.forEach(btn => {
         if (status === "SEARCHING" || status === "QUEUED") {
@@ -825,9 +844,20 @@ async function updateResearchUI(profileData) {
         document.getElementById("cancel-research-btn").onclick = () => cancelResearch(resumeName);
     } else {
         statusBox.style.display = "none";
-        if (status === "COMPLETED") {
-            // Optional: Show toast "Research Complete"
-        }
+    }
+}
+
+async function handleResearchCompletion(resumeName) {
+    try {
+        const res = await authFetch(`${API_BASE}/agents/matches?resume_filename=${resumeName}`);
+        if (!res.ok) return;
+
+        const data = await res.json();
+        addMessage("model", `✅ Research Complete! Found **${data.matches.length}** jobs.`);
+        addJobCards(data.matches);
+
+    } catch (e) {
+        console.error("Failed to handle completion", e);
     }
 }
 
@@ -983,8 +1013,11 @@ async function confirmSearch() {
 
         if (res.ok) {
             const data = await res.json();
-            // Start Polling
-            pollResearchStatus(resumeName);
+            // Start Polling - REMOVED for Realtime
+            // pollResearchStatus(resumeName);
+
+            // Force UI update to show searching state immediately
+            checkResearcherVisibility();
 
             if (data.session_id) {
                 addCancelButtonMessage(data.session_id);
@@ -1305,38 +1338,8 @@ function addJobCards(jobs) {
     scrollToBottom();
 }
 
-async function pollResearchStatus(resumeName) {
-    let attempts = 0;
-    const maxAttempts = 30;
+// pollResearchStatus removed in favor of Realtime updates via updateResearchUI
 
-    const interval = setInterval(async () => {
-        attempts++;
-        try {
-            const res = await authFetch(`${API_BASE}/agents/matches?resume_filename=${resumeName}`);
-            if (!res.ok) return;
-
-            const data = await res.json();
-            const status = data.status.status;
-
-            if (status === "COMPLETED" || (data.matches && data.matches.length > 0 && attempts % 5 === 0)) {
-                if (status === "COMPLETED" || attempts > 5) {
-                    clearInterval(interval);
-                    addMessage("model", `Research Complete! Found ${data.matches.length} jobs.`);
-                    addJobCards(data.matches);
-                    return;
-                }
-            }
-
-            if (attempts >= maxAttempts) {
-                clearInterval(interval);
-                addMessage("model", "Research is taking longer than expected. Check back later.");
-            }
-
-        } catch (e) {
-            console.error("Polling error", e);
-        }
-    }, 3000);
-}
 
 // --- Attach Resume Logic ---
 function initAttachResume() {
@@ -2105,11 +2108,30 @@ async function confirmApplyToChat() {
             const data = await res.json();
             let msg = "✅ Application started.";
             if (data.session_url) msg += `\n\n🔗 [Watch Live](${data.session_url})`;
-            addMessage("model", msg);
 
+            // If we are on CHAT page, just add message
+            // If we are on JOBS page (or other), REDIRECT to CHAT page with session_id
             if (data.session_id) {
-                addCancelButtonMessage(data.session_id);
+                const currentPath = window.location.pathname;
+                if (currentPath === "/" || currentPath.includes("index.html")) {
+                    // We are on chat page, just ensuring we are on correct session?
+                    // Usually initApplyModal is global. 
+                    // If we started a NEW session (which this API does typically if not passed), we should switch to it.
+                    // The API /agents/apply creates a session if we passed one? 
+                    // Wait, confirmApplyToChat logic doesn't pass session_id in payload above!
+                    // The API creates a NEW session if one isn't passed? run_applier_task takes session_id.
+                    // Check /agents/apply endpoint. It creates a new one!
+
+                    addCancelButtonMessage(data.session_id);
+                    loadSession(data.session_id);
+                } else {
+                    // Redirect
+                    window.location.href = `/?session_id=${data.session_id}`;
+                }
+            } else {
+                addMessage("model", msg);
             }
+
         } else {
             addMessage("model", "❌ Failed to start application.");
         }
