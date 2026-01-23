@@ -30,6 +30,7 @@ COPY . .
 # Cloud Run expects the container to listen on $PORT
 # We default to 8080 if not set
 ENV PORT=8080
+ENV IS_CLOUD_WORKER=true
 
 # Run Uvicorn
 CMD exec uvicorn main:app --host 0.0.0.0 --port ${PORT}
