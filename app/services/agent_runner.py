@@ -18,39 +18,47 @@ def update_research_status(user_id: int, resume_filename: str, status: str, last
     Updates the 'research_status' in the user's profile_data.
     States: IDLE, QUEUED, SEARCHING, COMPLETED, FAILED
     """
-    try:
-        response = supabase_service.client.table("profiles").select("profile_data").eq("user_id", user_id).execute()
-        if not response.data:
-            return
+    # Retry loop for resilience against "Server disconnected"
+    for attempt in range(3):
+        try:
+            response = supabase_service.client.table("profiles").select("profile_data").eq("user_id", user_id).execute()
+            if not response.data:
+                return
 
-        current_data = response.data[0].get("profile_data") or {}
-        if "research_status" not in current_data:
-            current_data["research_status"] = {}
+            current_data = response.data[0].get("profile_data") or {}
+            if "research_status" not in current_data:
+                current_data["research_status"] = {}
 
-        # RACE CONDITION FIX: Do not overwrite a FINAL state (COMPLETED/FAILED/CANCELLED) with an active state (SEARCHING)
-        # This happens if a delayed log broadcast finishes AFTER the main thread has set completion.
-        current_status_entry = current_data["research_status"].get(resume_filename, {})
-        current_status_val = current_status_entry.get("status", "IDLE")
+            # RACE CONDITION FIX: Do not overwrite a FINAL state (COMPLETED/FAILED/CANCELLED) with an active state (SEARCHING)
+            # This happens if a delayed log broadcast finishes AFTER the main thread has set completion.
+            current_status_entry = current_data["research_status"].get(resume_filename, {})
+            current_status_val = current_status_entry.get("status", "IDLE")
 
-        final_states = ["COMPLETED", "FAILED", "CANCELLED", "CANCEL_REQUESTED"]
-        if current_status_val in final_states and status not in final_states:
-             # Just update the log, NOT the status
-             current_data["research_status"][resume_filename]["last_log"] = last_log or current_status_entry.get("last_log")
-             # Keep existing status
-             current_data["research_status"][resume_filename]["updated_at"] = str(os.times())
-        else:
-            # Normal Update
-            current_data["research_status"][resume_filename] = {
-                "status": status,
-                "updated_at": str(os.times())
-            }
-            if last_log:
-                current_data["research_status"][resume_filename]["last_log"] = last_log
+            final_states = ["COMPLETED", "FAILED", "CANCELLED", "CANCEL_REQUESTED"]
+            if current_status_val in final_states and status not in final_states:
+                 # Just update the log, NOT the status
+                 current_data["research_status"][resume_filename]["last_log"] = last_log or current_status_entry.get("last_log")
+                 # Keep existing status
+                 current_data["research_status"][resume_filename]["updated_at"] = str(os.times())
+            else:
+                # Normal Update
+                current_data["research_status"][resume_filename] = {
+                    "status": status,
+                    "updated_at": str(os.times())
+                }
+                if last_log:
+                    current_data["research_status"][resume_filename]["last_log"] = last_log
 
-        supabase_service.update_user_profile(user_id, {"profile_data": current_data})
+            supabase_service.update_user_profile(user_id, {"profile_data": current_data})
+            return # Success
 
-    except Exception as e:
-        logger.error(f"Failed to update research status: {e}")
+        except Exception as e:
+            if attempt < 2:
+                print(f"⚠️ Failed to update research status (Attempt {attempt+1}/3): {e}. Retrying...")
+                import time
+                time.sleep(0.5)
+            else:
+                logger.error(f"Failed to update research status: {e}")
 
 
 

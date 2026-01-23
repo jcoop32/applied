@@ -130,3 +130,35 @@
 1. Increased `wait_for_network_idle_page_load_time` to 6.0s (from 4.0s).
 2. Increased `minimum_wait_page_load_time` to 3.0s (from 2.0s).
 3. Added `--disable-popup-blocking` and `--disable-notifications` to browser launch arguments to reduce interference.
+
+## User Report: 2026-01-22 (Cloud Worker 404 & Poilling Flood)
+**Error:** 
+1. Cloud Worker 404: Resume download fails because `user_id` is missing in `profile_blob`.
+2. Excessive Polling: Frontend polls `/api/profile` every 5 seconds when Realtime fails, flooding logs.
+
+**Root Cause:**
+1. `app/api/agents.py`: The `user_id` is available in `trigger_apply` but not injected into the `profile_blob` passed to the worker. The worker needs `user_id` to construct the resume path.
+2. `static/script.js`: `startPollingFallback` has a hardcoded interval of 5000ms (5s), which is too aggressive.
+
+**Fix Strategy:**
+1. Inject `profile_blob['user_id'] = user_id` in `app/api/agents.py` before dispatching the task.
+2. Increase polling interval to 15000ms (15s) in `static/script.js`.
+
+## User Report: 2026-01-22 (Cloud Worker Disconnection)
+**Error:** `Failed to update research status: Server disconnected` and `Storage endpoint URL should have a trailing slash`.
+**Root Cause:**
+1. **Connection Drops:** The Supabase client (httpx) inside Cloud Run occasionally drops the connection ("Server disconnected") during long-running async tasks, causing `update_research_status` to fail.
+2. **URL Warning:** `supabase-py` (specifically the storage client) requires the `SUPABASE_URL` to have a trailing slash, otherwise it emits a warning (or could potentially cause issues in strict versions).
+**Fix Strategy:**
+1. **Resilience:** Added a 3-attempt retry loop with backoff to `update_research_status` in `app/services/agent_runner.py` to handle transient connection failures.
+2. **Config:** Updated `app/services/supabase_client.py` to automatically append a trailing slash to the `SUPABASE_URL` if missing.
+
+## User Report: 2026-01-22 (Persistent WebSocket 401)
+**Error:** Supabase Realtime WebSocket returns 401 even with `access_token` passed correctly.
+**Diagnosis:** The frontend code (`initRealtime` in `script.js`) correctly initializes the Supabase client with `Authorization: Bearer <token>`. The failure is likely due to server-side configuration in the Supabase Dashboard.
+**Required Configuration (User Action):**
+1. **Replication:** Realtime must be explicitly enabled for `profiles` and `leads`. (Database -> Replication).
+2. **RLS Policies:** Since we use **custom Integer IDs** (not standard Supabase UUIDs), we must extract the ID from the JWT claims.
+   *   Policy: `CREATE POLICY "Enable read for users" ON "public"."profiles" AS PERMISSIVE FOR SELECT TO authenticated USING ((auth.jwt() ->> 'id')::bigint = user_id);`
+
+

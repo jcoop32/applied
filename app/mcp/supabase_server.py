@@ -12,9 +12,9 @@ def get_leads(user_id: int, resume_filename: str) -> str:
     Get job leads for a user and resume.
     Returns a JSON string of leads.
     """
-    leads = supabase_service.get_leads(user_id, resume_filename)
+    result = supabase_service.get_leads(user_id, resume_filename)
     # Convert dates/objects to serializable format if needed, but get_leads returns dicts
-    return str(leads)
+    return str(result.get("leads", []))
 
 @mcp.tool()
 def update_lead_status(lead_id: int, status: str) -> str:

@@ -104,7 +104,9 @@ async def get_matches(
     # 2. Get Matches from DB
     matches = []
     # Always fetch if there's data, regardless of status
-    matches = supabase_service.get_leads(user_id, resume_filename)
+    # Always fetch if there's data, regardless of status
+    matches_data = supabase_service.get_leads(user_id, resume_filename, limit=100) # Fetch more for matches view?
+    matches = matches_data.get("leads", [])
 
     # Fallback to JSON if DB empty? (Optional, maybe not needed if migration is clean slate)
     if not matches and current_status.get("status") == "COMPLETED":
@@ -151,6 +153,9 @@ async def trigger_apply(
         profile_blob['full_name'] = user_data.get('full_name')
 
     user_id = current_user['id']
+    
+    # Inject user_id into profile_blob for Cloud Worker resume download
+    profile_blob['user_id'] = user_id
     
     # IMMEDIATE STATUS UPDATE: Mark as IN_PROGRESS so UI reflects it immediately
     supabase_service.update_lead_status_by_url(user_id, job_url, "IN_PROGRESS", resume_filename=resume_filename)

@@ -18,7 +18,9 @@ class SupabaseService:
             print("⚠️ Warning: SUPABASE_URL or SUPABASE_KEY not found in .env")
             self.client = None
         else:
-            self.client: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+            # Ensure trailing slash for storage endpoint compatibility
+            url = SUPABASE_URL if SUPABASE_URL.endswith("/") else f"{SUPABASE_URL}/"
+            self.client: Client = create_client(url, SUPABASE_KEY)
         
         # Cache: Key = f"{user_id}_{resume_filename}" -> Value = (List[Dict], timestamp)
         self.leads_cache = {}
@@ -30,8 +32,11 @@ class SupabaseService:
         """
         cache_key = f"{user_id}_{resume_filename}"
         if cache_key in self.leads_cache:
-            del self.leads_cache[cache_key]
-            print(f"🧹 Invalidated leads cache for {cache_key}")
+            # Naive invalidation: remove all keys starting with prefix
+            keys_to_remove = [k for k in self.leads_cache if k.startswith(cache_key)]
+            for k in keys_to_remove:
+                del self.leads_cache[k]
+            print(f"🧹 Invalidated {len(keys_to_remove)} cache entries for {cache_key}")
 
     def upload_resume(self, file_content: bytes, file_name: str, user_id: int, content_type: str = "application/pdf") -> str:
         """
@@ -530,16 +535,17 @@ class SupabaseService:
             print(f"❌ Supabase Lead Delete Error: {e}")
             return False
 
-    def get_leads(self, user_id: int, resume_filename: str, limit: int = 50):
+    def get_leads(self, user_id: int, resume_filename: str, page: int = 1, limit: int = 10):
         """
-        Fetches leads for a specific resume from the 'leads' table.
+        Fetches leads for a specific resume from the 'leads' table with pagination.
+        Returns {"leads": [], "total": 0}
         """
         if not self.client:
-             return []
+             return {"leads": [], "total": 0}
 
         try:
             # Check Cache
-            cache_key = f"{user_id}_{resume_filename}"
+            cache_key = f"{user_id}_{resume_filename}_{page}_{limit}"
             if cache_key in self.leads_cache:
                 data, timestamp = self.leads_cache[cache_key]
                 if time.time() - timestamp < self.LEADS_CACHE_TTL:
@@ -549,21 +555,30 @@ class SupabaseService:
                     # print(f"⌛ Cache Expired for leads: {cache_key}")
                     pass
 
+            # Calculate Pagination
+            start = (page - 1) * limit
+            end = start + limit - 1
+
             # Order by match_score desc, then created_at desc
             response = self.client.table("leads")\
-                .select("*")\
+                .select("*", count="exact")\
                 .eq("user_id", user_id)\
                 .eq("resume_filename", resume_filename)\
                 .order("match_score", desc=True)\
-                .limit(limit)\
+                .range(start, end)\
                 .execute()
 
+            result = {
+                "leads": response.data,
+                "total": response.count
+            }
+
             # Update Cache
-            self.leads_cache[cache_key] = (response.data, time.time())
-            return response.data
+            self.leads_cache[cache_key] = (result, time.time())
+            return result
         except Exception as e:
             print(f"❌ Supabase Leads Fetch Error: {e}")
-            return []
+            return {"leads": [], "total": 0}
 
 
     

@@ -61,7 +61,7 @@ function startPollingFallback() {
         } catch (e) {
             console.error("Polling error", e);
         }
-    }, 5000);
+    }, 15000);
 }
 
 
@@ -877,8 +877,8 @@ async function initRealtime() {
             // Subscribe to Leads (New Jobs)
             // Note: RLS might prevent receiving events if row-level security is strict on real-time
             supabaseClient
-                .channel('public:job_leads')
-                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'job_leads', filter: `user_id=eq.${currentUser.id}` }, (payload) => {
+                .channel('public:leads')
+                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'leads', filter: `user_id=eq.${currentUser.id}` }, (payload) => {
                     console.log("Realtime: New Lead", payload);
                     // Toast or refresh jobs if on jobs page
                     showLogInternal(`New Job Found: ${payload.new.company_name} - ${payload.new.title}`, "success");
@@ -1675,28 +1675,63 @@ async function loadUserInfo() {
     }
 }
 
-async function loadJobs(resumeName) {
+let currentJobPage = 1;
+const jobsPerPage = 10;
+
+async function loadJobs(resumeName, page = 1) {
     const container = document.getElementById("jobs-container");
     const sortSelect = document.getElementById("sort-jobs");
     const sortBy = sortSelect ? sortSelect.value : "match_desc";
+
+    currentJobPage = page; // Update global state
+
+    // Update Header with Count if element exists, or insert it?
+    // Let's try to update a count element if we can find/create it.
+    let countDisplay = document.getElementById("jobs-total-count");
+    if (!countDisplay) {
+        // Try to find the header area to inject
+        // jobs.html uses <header><h1>...</h1></header> inside .main-container
+        const headerH1 = document.querySelector("main h1");
+        if (headerH1) {
+            countDisplay = document.createElement("span");
+            countDisplay.id = "jobs-total-count";
+            countDisplay.style.fontSize = "1rem";
+            countDisplay.style.marginLeft = "15px";
+            countDisplay.style.color = "var(--text-secondary)";
+            countDisplay.style.fontWeight = "normal";
+            headerH1.appendChild(countDisplay);
+        }
+    }
+
 
     container.innerHTML = "<p style='text-align:center;'>Loading leads...</p>";
 
     if (!resumeName) return;
 
     try {
-        const url = `${API_BASE}/leads/?resume=${encodeURIComponent(resumeName)}`;
+        // Pass page and limit
+        const url = `${API_BASE}/leads/?resume=${encodeURIComponent(resumeName)}&page=${page}&limit=${jobsPerPage}`;
         const res = await authFetch(url);
         const data = await res.json();
 
         container.innerHTML = "";
 
+        if (countDisplay) {
+            countDisplay.textContent = `(${data.total || 0} found)`;
+        }
+
         if (!data.leads || data.leads.length === 0) {
-            container.innerHTML = "<p style='text-align:center; color:gray;'>No leads found for this resume context.</p>";
+            container.innerHTML = "<p style='text-align:center; color:gray;'>No leads found for this page.</p>";
+            // Check if we are on a high page
+            if (page > 1) {
+                // Determine if we should go back?
+                renderPagination(container, data.total || 0, page);
+            }
             return;
         }
 
-        // --- SORTING LOGIC ---
+        // --- SORTING LOGIC (Client-Side for Page Only) ---
+        // Basic sort of the current page
         let leads = [...data.leads];
         leads.sort((a, b) => {
             if (sortBy === "match_desc") {
@@ -1706,8 +1741,6 @@ async function loadJobs(resumeName) {
             } else if (sortBy === "date_asc") {
                 return new Date(a.created_at) - new Date(b.created_at);
             } else if (sortBy === "status") {
-                // simple alphabetical sort for status, or custom weight
-                // Let's favor APPLIED > IN_PROGRESS > NEW > FAILED?
                 const weights = { "APPLIED": 4, "IN_PROGRESS": 3, "NEW": 2, "FAILED": 1 };
                 return (weights[b.status] || 0) - (weights[a.status] || 0);
             }
@@ -1721,9 +1754,7 @@ async function loadJobs(resumeName) {
             // Determine Status Color
             let statusClass = "status-new";
             if (lead.status === "APPLIED") statusClass = "status-applied";
-            if (lead.status === "IN_PROGRESS") statusClass = "status-in-progress"; // Ensure we have CSS for this or fallback
-            // Note: If no 'status-in-progress' class exists, it might fall back to default text color.
-            // We can just add inline style or verify css later.
+            if (lead.status === "IN_PROGRESS") statusClass = "status-in-progress";
 
             // Format Date
             const dateStr = lead.created_at ? new Date(lead.created_at).toLocaleDateString() : "Unknown Date";
@@ -1789,10 +1820,61 @@ async function loadJobs(resumeName) {
             container.appendChild(div);
         });
 
+        // Add Pagination Controls
+        renderPagination(container, data.total || 0, page, resumeName);
+
     } catch (e) {
         console.error("Error loading jobs", e);
         container.innerHTML = "<p style='text-align:center;'>Error loading leads.</p>";
     }
+}
+
+function renderPagination(container, total, page, resumeName) {
+    const totalPages = Math.ceil(total / jobsPerPage);
+
+    if (totalPages <= 1) return;
+
+    const nav = document.createElement("div");
+    nav.className = "pagination-nav";
+    nav.style.display = "flex";
+    nav.style.justifyContent = "center";
+    nav.style.alignItems = "center";
+    nav.style.gap = "15px";
+    nav.style.marginTop = "20px";
+    nav.style.padding = "10px";
+
+    // Prev Button
+    const prevBtn = document.createElement("button");
+    prevBtn.innerHTML = '<i class="fas fa-chevron-left"></i>';
+    prevBtn.className = "chip";
+    prevBtn.disabled = page === 1;
+    prevBtn.style.opacity = page === 1 ? "0.5" : "1";
+    prevBtn.style.cursor = page === 1 ? "default" : "pointer";
+    prevBtn.onclick = () => {
+        if (page > 1) loadJobs(resumeName, page - 1);
+    };
+
+    // Text
+    const span = document.createElement("span");
+    span.textContent = `Page ${page} of ${totalPages}`;
+    span.style.color = "var(--text-secondary)";
+
+    // Next Button
+    const nextBtn = document.createElement("button");
+    nextBtn.innerHTML = '<i class="fas fa-chevron-right"></i>';
+    nextBtn.className = "chip";
+    nextBtn.disabled = page === totalPages;
+    nextBtn.style.opacity = page === totalPages ? "0.5" : "1";
+    nextBtn.style.cursor = page === totalPages ? "default" : "pointer";
+    nextBtn.onclick = () => {
+        if (page < totalPages) loadJobs(resumeName, page + 1);
+    };
+
+    nav.appendChild(prevBtn);
+    nav.appendChild(span);
+    nav.appendChild(nextBtn);
+
+    container.appendChild(nav);
 }
 
 async function deleteLead(leadId, rowElement) {

@@ -8,7 +8,8 @@ router = APIRouter()
 @router.get("/")
 async def get_leads(
     resume: Optional[str] = Query(None, description="Filter by resume filename"),
-    limit: int = 50,
+    page: int = 1,
+    limit: int = 10,
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -17,25 +18,21 @@ async def get_leads(
     """
     user_id = current_user['id']
     
-    # If no resume specified, maybe try to get primary? 
-    # Or just return empty list if strict context is needed?
-    # Existing `get_leads` in supabase_client requires resume_filename.
-    
     if not resume:
         # Try to get primary resume
         user_data = supabase_service.get_user_by_email(current_user['email'])
         if user_data and user_data.get('primary_resume_name'):
             resume = user_data['primary_resume_name']
         else:
-            # Return empty or all? The service method currently requires resume_filename.
-            # Strategy: If no resume, maybe we should fetch all leads? 
-            # But the service structure relies on cache key user_resume.
-            # For now, let's require it or default to primary.
-            return {"leads": [], "resume_context": None, "message": "No resume context found."}
+            return {"leads": [], "total": 0, "resume_context": None, "message": "No resume context found."}
 
-    leads = supabase_service.get_leads(user_id, resume, limit=limit)
+    result = supabase_service.get_leads(user_id, resume, page=page, limit=limit)
+    
     return {
-        "leads": leads,
+        "leads": result["leads"],
+        "total": result["total"],
+        "page": page,
+        "limit": limit,
         "resume_context": resume
     }
 
