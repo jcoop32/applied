@@ -8,6 +8,7 @@ from typing import List, Set, Dict, Any
 from google import genai
 from browser_use import Agent, Browser
 from browser_use.llm import ChatGoogle
+from app.services.supabase_client import supabase_service
 
 class GoogleResearcherAgent:
     def __init__(self, api_key: str):

@@ -5,10 +5,6 @@ import re
 from urllib.parse import urlparse
 from google import genai
 from playwright.async_api import async_playwright
-from mcp.server.fastmcp import FastMCP
-
-# Initialize FastMCP
-mcp = FastMCP("Browser Automation MCP")
 
 KNOWN_ATS = ["greenhouse.io", "lever.co", "workday.com", "ashbyhq.com", "bamboohr.com", "smartrecruiters.com", "icims.com"]
 KNOWN_AGGREGATORS = ["adzuna.com", "indeed.com", "linkedin.com", "ziprecruiter.com", "glassdoor.com"]
@@ -214,10 +210,8 @@ class UrlResolver:
                 final_domain = urlparse(extracted_url).netloc
                 if any(agg in final_domain for agg in KNOWN_AGGREGATORS):
                     print(f"❌ Failed to resolve URL. Stuck on aggregator: {final_domain}")
-                    # In MCP context, we might prefer returning the original URL if getting stuck, 
-                    # or returning what we found and letting the user decide.
-                    # We'll return it but the agent might struggle.
-
+                    # In service context, we return what we found
+                
                 return extracted_url
 
             return final_url
@@ -228,19 +222,12 @@ class UrlResolver:
             traceback.print_exc()
             return job_url
 
-# Initialize Resolver
+    async def resolve_job_url(self, raw_url: str) -> str:
+        """
+        Takes a raw job link (e.g. from Adzuna), performs HTTP/Playwright/LLM analysis
+        to find the direct ATS link, and returns the clean URL.
+        """
+        return await self.resolve_application_url(raw_url)
+
+# Initialize Resolver (Singleton)
 resolver = UrlResolver(api_key=os.getenv("GEMINI_API_KEY"))
-
-@mcp.tool()
-async def resolve_job_url(raw_url: str) -> str:
-    """
-    Takes a raw job link (e.g. from Adzuna), performs HTTP/Playwright/LLM analysis
-    to find the direct ATS link, and returns the clean URL.
-    """
-    return await resolver.resolve_application_url(raw_url)
-
-if __name__ == "__main__":
-    # Serve using SSE on port 8002
-    import uvicorn
-    print("Starting Browser MCP Server on port 8002 (SSE)...")
-    uvicorn.run(mcp.sse_app, host="0.0.0.0", port=8002)

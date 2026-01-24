@@ -585,6 +585,22 @@ class SupabaseService:
 
     
     # --- Chat Persistence ---
+    def get_pending_leads(self, user_id: int):
+        """
+        Get all leads with status 'NEW' for a user.
+        """
+        if not self.client: return []
+        try:
+            response = self.client.table("leads")\
+                .select("*")\
+                .eq("user_id", user_id)\
+                .eq("status", "NEW")\
+                .execute()
+            return response.data
+        except Exception as e:
+            print(f"❌ Supabase Pending Leads Fetch Error: {e}")
+            return []
+
     def ensure_chat_tables(self):
         """
         Creates chat_sessions and chat_messages tables if they don't exist.
