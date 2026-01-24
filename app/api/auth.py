@@ -138,5 +138,5 @@ async def get_frontend_config(current_user: dict = Depends(get_current_user)):
     """
     return {
         "supabase_url": os.getenv("SUPABASE_URL"),
-        "supabase_anon_key": os.getenv("SUPABASE_KEY") # Usually the Anon Key for client usage
+        "supabase_anon_key": os.getenv("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_KEY")
     }

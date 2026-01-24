@@ -456,14 +456,23 @@ class ApplierAgent:
         # Usually standard config is fine.
         
         # FIX: Strict check for managed browser + API key. Do NOT auto-enable just because key exists.
-        if use_managed_browser and os.getenv("BROWSER_USE_API_KEY"):
+        has_bu_key = bool(os.getenv("BROWSER_USE_API_KEY"))
+        print(f"🕵️ Debug: use_managed_browser={use_managed_browser}, has_key={has_bu_key}")
+
+        if use_managed_browser and has_bu_key:
             print("☁️ Using Browser Use Cloud for enhanced stealth")
             # Cloud browser does not support 'headless' arg in the same way, usually handled remote
             browser = Browser(use_cloud=True)
+
             try:
                 # Attempt to get session ID for live view
                 # This depends on browser-use internals, assuming browser.session_id or browser.config.session_id
+                # Let's INSPECT it
+                print(f"🕵️ Browser Attributes: {dir(browser)}")
+                
                 b_session_id = getattr(browser, 'session_id', None)
+                print(f"🕵️ Extracted Session ID: {b_session_id}")
+                
                 if b_session_id:
                     session_url = f"https://cloud.browser-use.com/sessions/{b_session_id}"
                     print(f"🔗 Browser Use Session: {session_url}")

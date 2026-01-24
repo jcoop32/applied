@@ -169,4 +169,27 @@
 2. Updated `deploy.sh` to set `IS_CLOUD_WORKER=true` via `--update-env-vars` purely for the Cloud Run instance.
 3. Redeploy the Cloud Run service.
 
+## User Report: 2026-01-24
+**Error:** Syntax error at end of script.js ("expected '}'").
+**Root Cause:** A failed `multi_replace_file_content` tool call resulted in a duplicate, unclosed `function createExperienceCard` declaration being inserted before the existing one, creating a nested function structure that swallowed the rest of the file and left the global scope unclosed.
+**Fix Strategy:** Removed the orphaned duplicate lines (1249-1258).
 
+## User Report: 2026-01-24 (Cloud Dispatch Failed)
+**Error:** `Cloud Dispatch Failed: {"detail":"SupabaseService.update_lead_status() got an unexpected keyword argument 'status_msg'"}`
+**Root Cause:** The `run_applier_task` function in `agent_runner.py` was calling `supabase_service.update_lead_status` with a `status_msg` keyword argument (likely from a previous version of the function signature), but the current definition in `supabase_client.py` does not accept this argument.
+**Fix Strategy:** Removed the invalid `status_msg` argument and implemented dynamic status construction (e.g. "APPLYING (Cloud)" vs "APPLYING (Local)") based on `IS_CLOUD_WORKER` environment variable.
+
+## Internal Issue: Missing Browser Use Cloud Session Link
+**Context:** User reported that the "Watch Live" link for Browser Use Cloud is not appearing in the UI.
+**Investigation:** Suspected issue with `browser-use` library not exposing `session_id` as expected, or `BROWSER_USE_API_KEY` not being detected. 
+**Next Steps:** Instrumenting `app/agents/applier.py` with debug logging to inspect run-time attributes of the `Browser` object and environment variables.
+
+
+
+## Internal Issue: Invalid Supabase Key Usage & Key Split
+**Context:** Supabase Realtime WebSocket connection refused (NS_ERROR_WEBSOCKET_CONNECTION_REFUSED). Logs showed `apikey=sb_secret_...` which is invalid for client-side use.
+**Root Cause:** The `.env` used a single `SUPABASE_KEY` which contained the Service Role (secret) key starting with `sb_secret_` (or similar non-JWT format in some contexts, though usually it's `eyJ...`). The frontend requires the Anon public key (JWT), and the backend should prefer the Service Role key for admin privileges. Sharing one key for both is insecure and caused the frontend to send an invalid key.
+**Solution:**
+1. Split configuration into `SUPABASE_ANON_KEY` (Frontend/Client) and `SUPABASE_SERVICE_ROLE_KEY` (Backend/Admin).
+2. Updated `auth.py` to serve `SUPABASE_ANON_KEY` to the frontend via `/config`.
+3. Updated `supabase_client.py` to use `SUPABASE_SERVICE_ROLE_KEY` for backend operations.

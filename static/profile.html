@@ -194,7 +194,12 @@
 
                             <div class="form-group">
                                 <label>Desired Salary</label>
-                                <input type="text" id="salary_expectations" placeholder="e.g. $120k+, Negotiable">
+                                <div style="position: relative;">
+                                    <span
+                                        style="position: absolute; left: 12px; top: 12px; color: var(--text-secondary);">$</span>
+                                    <input type="text" id="salary_expectations" placeholder="e.g. 120,000.00"
+                                        style="padding-left: 25px;">
+                                </div>
                             </div>
 
                             <!-- Extended Demographics -->
@@ -243,14 +248,14 @@
                             style="margin-top:30px; margin-bottom: 15px; color: var(--accent-color); font-size: 1rem; text-transform: uppercase; letter-spacing: 0.05em;">
                             Resume Details</h3>
 
-                        <div class="form-group">
+                        <div class="form-group" style="margin-bottom: 40px;">
                             <label>Professional Summary</label>
-                            <textarea id="summary" style="min-height: 100px; line-height: 1.5;"></textarea>
+                            <textarea id="summary" style="min-height: 200px; line-height: 1.6;"></textarea>
                         </div>
 
                         <div class="form-group">
                             <label>Skills (Comma Separated)</label>
-                            <textarea id="skills" style="min-height: 80px; line-height: 1.5;"></textarea>
+                            <textarea id="skills" style="min-height: 120px; line-height: 1.6;"></textarea>
                         </div>
 
                         <!-- Employment History Section -->
@@ -277,7 +282,7 @@
                             </p>
                         </div>
 
-                                                <!-- Hidden raw backup just in case -->
+                        <!-- Hidden raw backup just in case -->
                         <textarea id="profile_data" class="json-editor" style="display:none;"></textarea>
 
                         <div

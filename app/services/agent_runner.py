@@ -352,24 +352,27 @@ async def run_applier_task(job_url: str, resume_path: str, user_profile: dict, a
     # Resolve Lead ID for status updates
     # user_id already resolved above
     
-    lead_id = None
-    if user_id:
-        # Use new method that handles fetch properly
-        lead = supabase_service.get_lead_by_url(user_id, job_url)
-        if lead:
-            lead_id = lead['id']
-            print(f"📋 Found Lead ID: {lead_id}")
-            # Use specific ID update
-            # Pass invalidation metadata if we have it
-            supabase_service.update_lead_status(lead_id, "APPLYING", user_id=user_id, resume_filename=resume_filename, status_msg="Running Locally")
-        else:
-            print("⚠️ Could not find existing lead for this URL. Status updates will be skipped.")
-    else:
-        print("⚠️ No User ID found in profile. Cannot resolve lead.")
-
     try:
         # Detect environment for headless mode
         is_headless = os.getenv("HEADLESS", "false").lower() == "true"
+        is_cloud = os.getenv("IS_CLOUD_WORKER") == "true"
+        status_suffix = "(Cloud)" if is_cloud else "(Local)"
+        
+        # Resolve Lead ID for status updates
+        lead_id = None
+        if user_id:
+            # Use new method that handles fetch properly
+            lead = supabase_service.get_lead_by_url(user_id, job_url)
+            if lead:
+                lead_id = lead['id']
+                print(f"📋 Found Lead ID: {lead_id}")
+                # Use specific ID update
+                supabase_service.update_lead_status(lead_id, f"APPLYING {status_suffix}", user_id=user_id, resume_filename=resume_filename)
+            else:
+                print("⚠️ Could not find existing lead for this URL. Status updates will be skipped.")
+        else:
+            print("⚠️ No User ID found in profile. Cannot resolve lead.")
+
         applier = ApplierAgent(api_key=api_key, headless=is_headless)
         
         # Determine Managed Browser (Browser Use Cloud) usage

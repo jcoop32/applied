@@ -5,7 +5,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY") # Legacy Fallback
 BUCKET_NAME = "resumes"
 
 import time
@@ -14,12 +15,14 @@ from functools import lru_cache
 
 class SupabaseService:
     def __init__(self):
-        if not SUPABASE_URL or not SUPABASE_KEY:
-            print("⚠️ Warning: SUPABASE_URL or SUPABASE_KEY not found in .env")
+        key = SUPABASE_SERVICE_ROLE_KEY or SUPABASE_KEY
+        if not SUPABASE_URL or not key:
+            print("⚠️ Warning: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not found in .env")
             self.client = None
         else:
             # Passing SUPABASE_URL as-is to avoid "Storage endpoint URL should have a trailing slash" warning
-            self.client: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+            # Use Service Role Key for Backend -> Bypasses RLS for admin tasks
+            self.client: Client = create_client(SUPABASE_URL, key)
         
         # Cache: Key = f"{user_id}_{resume_filename}" -> Value = (List[Dict], timestamp)
         self.leads_cache = {}

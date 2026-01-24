@@ -45,6 +45,43 @@ let currentUser = null;
 let lastResearchStatus = {}; // Cache to track transitions
 let pollingInterval = null;
 
+// Throttling State
+let profileFetchPromise = null;
+let lastProfileFetchTime = 0;
+const PROFILE_THROTTLE_MS = 2000; // Minimum 2s between fetches
+
+async function fetchUserProfile(force = false) {
+    const now = Date.now();
+
+    // 1. Deduplication: Return existing promise if in flight
+    if (profileFetchPromise) return profileFetchPromise;
+
+    // 2. Throttling: Return cached if too soon (unless forced)
+    if (!force && (now - lastProfileFetchTime < PROFILE_THROTTLE_MS) && window.currentUserProfile) {
+        // console.log("⏳ Throttled profile fetch (Using Cache)");
+        return window.currentUserProfile;
+    }
+
+    // 3. Fetch
+    profileFetchPromise = (async () => {
+        try {
+            const res = await authFetch(`${API_BASE}/profile`);
+            if (!res.ok) throw new Error("Profile Fetch Failed");
+            const data = await res.json();
+            window.currentUserProfile = data;
+            lastProfileFetchTime = Date.now();
+            return data;
+        } catch (e) {
+            console.error("Fetch Profile Error:", e);
+            throw e;
+        } finally {
+            profileFetchPromise = null;
+        }
+    })();
+
+    return profileFetchPromise;
+}
+
 function startPollingFallback() {
     if (pollingInterval) return;
     console.warn("⚠️ Switching to 5s Polling Fallback for Status Updates.");
@@ -52,12 +89,8 @@ function startPollingFallback() {
     pollingInterval = setInterval(async () => {
         try {
             // Re-fetch profile to get status
-            // This also implicitly checks auth/token validity via authFetch
-            const res = await authFetch(`${API_BASE}/profile`);
-            if (res.ok) {
-                const data = await res.json();
-                updateResearchUI(data);
-            }
+            const data = await fetchUserProfile(true); // Forced fetch for polling
+            updateResearchUI(data);
         } catch (e) {
             console.error("Polling error", e);
         }
@@ -347,7 +380,7 @@ async function loadSessions() {
 }
 
 async function deleteSession(sessionId) {
-    if (!confirm("Are you sure you want to delete this chat?")) return;
+    if (!await showConfirm("Are you sure you want to delete this chat?", "Delete Chat", "Delete", "Cancel")) return;
 
     try {
         const res = await authFetch(`${API_BASE}/chat/sessions/${sessionId}`, {
@@ -362,7 +395,7 @@ async function deleteSession(sessionId) {
                 loadSessions();
             }
         } else {
-            alert("Failed to delete session");
+            showToast("Failed to delete session", "error");
         }
     } catch (e) {
         console.error("Delete failed", e);
@@ -383,7 +416,7 @@ async function renameSession(sessionId, oldTitle) {
         if (res.ok) {
             loadSessions(); // Refresh list
         } else {
-            alert("Failed to rename session");
+            showToast("Failed to rename session", "error");
         }
     } catch (e) {
         console.error("Rename failed", e);
@@ -564,6 +597,150 @@ function showLogInternal(text, type = "info") {
     // Ensure terminal is visible/open if new logs come in
     terminal.classList.remove("minimized");
 }
+
+
+// Toast Notification System
+class ToastSystem {
+    constructor() {
+        this.container = null;
+        this.init();
+    }
+
+    init() {
+        // Create container if it doesn't exist
+        if (!document.getElementById('toast-container')) {
+            this.container = document.createElement('div');
+            this.container.id = 'toast-container';
+            document.body.appendChild(this.container);
+        } else {
+            this.container = document.getElementById('toast-container');
+        }
+    }
+
+    show(message, type = 'info', duration = 5000) {
+        if (!this.container) this.init();
+
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+
+        // Icons mapping
+        const icons = {
+            success: 'fa-check-circle',
+            error: 'fa-exclamation-circle',
+            warning: 'fa-exclamation-triangle',
+            info: 'fa-info-circle'
+        };
+
+        const iconClass = icons[type] || icons.info;
+
+        toast.innerHTML = `
+            <div class="toast-content">
+                <i class="fas ${iconClass} toast-icon"></i>
+                <span class="toast-message">${this.escapeHtml(message)}</span>
+            </div>
+            <button class="toast-close" onclick="this.parentElement.remove()">
+                <i class="fas fa-times"></i>
+            </button>
+        `;
+
+        this.container.appendChild(toast);
+
+        // Auto remove
+        setTimeout(() => {
+            if (toast.parentElement) {
+                toast.classList.add('hiding');
+                toast.addEventListener('animationend', () => {
+                    if (toast.parentElement) {
+                        toast.remove();
+                    }
+                });
+            }
+        }, duration);
+    }
+
+    escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+}
+
+// Global instance
+const toastSystem = new ToastSystem();
+
+// Expose global function
+window.showToast = (message, type = 'info') => {
+    toastSystem.show(message, type);
+};
+
+// Confirmation Modal System (Promise-based)
+class ConfirmSystem {
+    constructor() {
+        this.modal = null;
+        this.resolvePromise = null;
+        this.init();
+    }
+
+    init() {
+        if (!document.getElementById('confirm-modal')) {
+            this.modal = document.createElement('div');
+            this.modal.id = 'confirm-modal';
+            this.modal.innerHTML = `
+                <div class="confirm-box">
+                    <div class="confirm-title" id="confirm-title">Confirm Action</div>
+                    <div class="confirm-message" id="confirm-message">Are you sure?</div>
+                    <div class="confirm-actions">
+                        <button class="btn-confirm-cancel" id="confirm-cancel-btn">Cancel</button>
+                        <button class="btn-confirm-danger" id="confirm-ok-btn">Confirm</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(this.modal);
+
+            // Bind events
+            document.getElementById('confirm-cancel-btn').onclick = () => this.close(false);
+            document.getElementById('confirm-ok-btn').onclick = () => this.close(true);
+            // Click outside to cancel
+            this.modal.onclick = (e) => {
+                if (e.target === this.modal) this.close(false);
+            };
+        } else {
+            this.modal = document.getElementById('confirm-modal');
+        }
+    }
+
+    show(message, title = "Confirm Action", confirmText = "Confirm", cancelText = "Cancel") {
+        if (!this.modal) this.init();
+
+        document.getElementById('confirm-message').textContent = message;
+        document.getElementById('confirm-title').textContent = title;
+        document.getElementById('confirm-ok-btn').textContent = confirmText;
+        document.getElementById('confirm-cancel-btn').textContent = cancelText;
+
+        this.modal.classList.add('visible');
+
+        return new Promise((resolve) => {
+            this.resolvePromise = resolve;
+        });
+    }
+
+    close(result) {
+        if (this.modal) {
+            this.modal.classList.remove('visible');
+        }
+        if (this.resolvePromise) {
+            this.resolvePromise(result);
+            this.resolvePromise = null;
+        }
+    }
+}
+
+const confirmSystem = new ConfirmSystem();
+window.showConfirm = (message, title, confirmText, cancelText) => {
+    return confirmSystem.show(message, title, confirmText, cancelText);
+};
+
 
 
 // --- Chat Actions ---
@@ -824,14 +1001,29 @@ async function initRealtime() {
         let config = null;
         const cachedConfig = localStorage.getItem('app_config');
         if (cachedConfig) {
-            try { config = JSON.parse(cachedConfig); } catch (e) { }
+            try {
+                config = JSON.parse(cachedConfig);
+                // Quick Validation: Invalid if key starts with "sb_secret" (Service Role)
+                // We want "eyJ..." (JWT/Anon)
+                if (config.supabase_anon_key && config.supabase_anon_key.startsWith("sb_secret")) {
+                    console.warn("⚠️ Detected invalid cached Supabase Key (Service Role). Purging cache.");
+                    localStorage.removeItem('app_config');
+                    config = null;
+                }
+            } catch (e) { }
         }
 
         if (!config) {
-            const configRes = await authFetch('/api/auth/config');
-            if (!configRes.ok) return;
-            config = await configRes.json();
-            localStorage.setItem('app_config', JSON.stringify(config));
+            try {
+                const configRes = await authFetch('/api/auth/config');
+                if (configRes.ok) {
+                    config = await configRes.json();
+                    localStorage.setItem('app_config', JSON.stringify(config));
+                }
+            } catch (e) {
+                console.warn("Failed to load config, retrying...");
+                return;
+            }
         }
 
         if (window.supabase) {
@@ -888,13 +1080,9 @@ async function initRealtime() {
             // Initial UI Check
             // Use cached profile if we just fetched it or reuse it
             if (!window.currentUserProfile) {
-                const res = await authFetch(`${API_BASE}/profile`);
-                const data = await res.json();
-                window.currentUserProfile = data;
-                updateResearchUI(data);
-            } else {
-                updateResearchUI(window.currentUserProfile);
+                await fetchUserProfile();
             }
+            updateResearchUI(window.currentUserProfile);
         }
     } catch (e) {
         console.error("Realtime Init Failed", e);
@@ -1028,8 +1216,7 @@ async function cancelResearch(resumeName) {
 async function checkResearcherVisibility() {
     // Just trigger the update logic which fetches profile
     try {
-        const res = await authFetch(`${API_BASE}/profile`);
-        const data = await res.json();
+        const data = await fetchUserProfile();
         updateResearchUI(data);
     } catch (e) { }
 }
@@ -1117,7 +1304,7 @@ async function confirmSearch() {
     const resumeName = resumeSelect.value;
 
     if (!resumeName) {
-        alert("Please select a resume context.");
+        showToast("Please select a resume context.", "warning");
         return;
     }
 
@@ -1186,13 +1373,253 @@ async function initProfilePage() {
     const resumeSelect = document.getElementById("primary-resume-select");
     const autoFillBtn = document.getElementById("parse-btn");
 
+    // Initialize Salary Formatting
+    const salaryInput = document.getElementById("salary_expectations");
+    if (salaryInput) {
+        salaryInput.addEventListener("input", function (e) {
+            // Remove non-numeric characters except basic punctuation if needed, 
+            // but usually for currency we want to strip everything then re-format
+            let value = this.value.replace(/[^0-9.]/g, '');
+
+            // Simple logic: if it looks like a number, format it
+            if (value) {
+                // Prevent multiple dots
+                const parts = value.split('.');
+                if (parts.length > 2) {
+                    value = parts[0] + '.' + parts.slice(1).join('');
+                }
+
+                // Add commas
+                // We assume user types "1000" -> "1,000"
+                // If they type "1000.50" -> "1,000.50"
+
+                // Only format the integer part
+                const intPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+                if (parts.length > 1) {
+                    this.value = `${intPart}.${parts[1]}`;
+                } else {
+                    // If user is just typing integer, we act normal but add commas? 
+                    // But replacing strictly on input can be annoying (cursor jumps).
+                    // Ideally formatted on blur or carefully constructed.
+                    // For simple "money format", let's just format on Blur to avoid fighting cursor?
+                    // User asked: "user types 1000 and the ui switches to 1,000.00"
+                    // Usually this implies on blur or smart input mask. Let's do on blur to be safe with cursor.
+                }
+            }
+        });
+
+        salaryInput.addEventListener("blur", function () {
+            let value = this.value.replace(/[^0-9.]/g, '');
+            if (value && !isNaN(value)) {
+                // Convert to number then string with 2 decimals
+                const num = parseFloat(value);
+                this.value = num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            }
+        });
+    }
+
     // Store current profile for merging later
     let currentProfile = {};
 
+    // Helper: Render Editable Experience
+    window.addExperience = () => {
+        const container = document.getElementById("experience-list");
+        container.appendChild(createExperienceCard({}));
+    };
+
+    window.removeCard = (btn) => {
+        if (confirm("Remove this item?")) {
+            btn.closest('.experience-card').remove();
+        }
+    };
+
+
+    function createExperienceCard(e) {
+        const div = document.createElement('div');
+        div.className = 'experience-card editable-card';
+        div.style.position = "relative";
+        div.style.background = "rgba(255, 255, 255, 0.03)";
+        div.style.padding = "25px";
+        div.style.borderRadius = "12px";
+        div.style.marginBottom = "30px";
+        div.style.border = "1px solid var(--glass-border)";
+
+        let start = e.start_date || "";
+        let end = e.end_date || "";
+        if (!start && !end && e.duration) {
+            const parts = e.duration.split(" - ");
+            start = parts[0] || "";
+            end = parts[1] || "";
+        }
+
+        const parseDateParts = (d) => {
+            if (!d) return { m: "", y: "" };
+            const p = d.trim().split(" ");
+            if (p.length >= 2) return { m: p[0], y: p[1] };
+            return { m: "", y: d }; // fallback
+        };
+
+        const sParts = parseDateParts(start);
+        const eParts = parseDateParts(end);
+
+        // Helper generators
+        const genMonths = (sel) => {
+            const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+            let html = '<option value="">Month</option>';
+            months.forEach(m => {
+                html += `<option value="${m}" ${m === sel ? 'selected' : ''}>${m}</option>`;
+            });
+            return html;
+        };
+
+        const genYears = (sel) => {
+            const currentYear = new Date().getFullYear();
+            let html = '<option value="">Year</option>';
+            for (let y = currentYear + 7; y >= 1980; y--) {
+                html += `<option value="${y}" ${String(y) === String(sel) ? 'selected' : ''}>${y}</option>`;
+            }
+            return html;
+        };
+
+        div.innerHTML = `
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                <div class="form-group" style="margin-bottom:0;">
+                    <label style="font-size:0.8rem; margin-bottom: 8px; display:block;">Job Title</label>
+                    <input type="text" class="exp-title" value="${(e.title || '').replace(/"/g, '&quot;')}" placeholder="Software Engineer">
+                </div>
+                <div class="form-group" style="margin-bottom:0;">
+                    <label style="font-size:0.8rem; margin-bottom: 8px; display:block;">Company</label>
+                    <input type="text" class="exp-company" value="${(e.company || '').replace(/"/g, '&quot;')}" placeholder="Acme Corp">
+                </div>
+            </div>
+            
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                <!-- Start Date Group -->
+                <div class="form-group" style="margin-bottom:0;">
+                   <label style="font-size:0.8rem; margin-bottom: 8px; display:block;">Start Date</label>
+                   <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                       <select class="exp-start-month input-dropdown" style="padding: 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.2); color: white;">${genMonths(sParts.m)}</select>
+                       <select class="exp-start-year input-dropdown" style="padding: 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.2); color: white;">${genYears(sParts.y)}</select>
+                   </div>
+                </div>
+
+                <!-- End Date Group -->
+                <div class="form-group" style="margin-bottom:0;">
+                   <label style="font-size:0.8rem; margin-bottom: 8px; display:block;">End Date</label>
+                   <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                       <select class="exp-end-month input-dropdown" style="padding: 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.2); color: white;">${genMonths(eParts.m)}</select>
+                       <select class="exp-end-year input-dropdown" style="padding: 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.2); color: white;">${genYears(eParts.y)}</select>
+                   </div>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label style="font-size:0.8rem; margin-bottom: 8px; display:block;">Description / Responsibilities</label>
+                <textarea class="exp-desc" style="min-height: 200px; font-size: 0.95rem; line-height: 1.6;">${e.responsibilities || ''}</textarea>
+            </div>
+            <button type="button" onclick="removeCard(this)" style="position: absolute; top: 15px; right: 15px; background: none; border: none; color: #ff6b6b; cursor: pointer; padding: 5px;">
+                <i class="fas fa-trash"></i>
+            </button>
+        `;
+        return div;
+    }
+
+    // Helper: Render Editable Education
+    window.addEducation = () => {
+        const container = document.getElementById("education-list");
+        container.appendChild(createEducationCard({}));
+    };
+
+    function createEducationCard(e) {
+        const div = document.createElement('div');
+        div.className = 'experience-card editable-card';
+        div.style.position = "relative";
+        div.style.background = "rgba(255, 255, 255, 0.03)";
+        div.style.padding = "25px";
+        div.style.borderRadius = "12px";
+        div.style.marginBottom = "30px";
+        div.style.border = "1px solid var(--glass-border)";
+
+        let start = e.start_date || "";
+        let end = e.end_date || "";
+        if (!start && !end && e.date) {
+            const parts = e.date.split(" - ");
+            start = parts[0] || "";
+            end = parts[1] || "";
+        }
+
+        const parseDateParts = (d) => {
+            if (!d) return { m: "", y: "" };
+            const p = d.trim().split(" ");
+            if (p.length >= 2) return { m: p[0], y: p[1] };
+            return { m: "", y: d }; // fallback
+        };
+
+        const sParts = parseDateParts(start);
+        const eParts = parseDateParts(end);
+
+        // Helper generators
+        const genMonths = (sel) => {
+            const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+            let html = '<option value="">Month</option>';
+            months.forEach(m => {
+                html += `<option value="${m}" ${m === sel ? 'selected' : ''}>${m}</option>`;
+            });
+            return html;
+        };
+
+        const genYears = (sel) => {
+            const currentYear = new Date().getFullYear();
+            let html = '<option value="">Year</option>';
+            for (let y = currentYear + 7; y >= 1980; y--) {
+                html += `<option value="${y}" ${String(y) === String(sel) ? 'selected' : ''}>${y}</option>`;
+            }
+            return html;
+        };
+
+        div.innerHTML = `
+             <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                <div class="form-group" style="margin-bottom:0;">
+                    <label style="font-size:0.8rem; margin-bottom: 8px; display:block;">School / Institution</label>
+                    <input type="text" class="edu-school" value="${(e.school || '').replace(/"/g, '&quot;')}" placeholder="University of Tech">
+                </div>
+                <div class="form-group" style="margin-bottom:0;">
+                    <label style="font-size:0.8rem; margin-bottom: 8px; display:block;">Degree / Major</label>
+                    <input type="text" class="edu-degree" value="${(e.degree || '').replace(/"/g, '&quot;')}" placeholder="BS Computer Science">
+                </div>
+            </div>
+            
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                <!-- Start Date Group -->
+                <div class="form-group" style="margin-bottom:0;">
+                   <label style="font-size:0.8rem; margin-bottom: 8px; display:block;">Start Date</label>
+                   <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                       <select class="edu-start-month input-dropdown" style="padding: 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.2); color: white;">${genMonths(sParts.m)}</select>
+                       <select class="edu-start-year input-dropdown" style="padding: 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.2); color: white;">${genYears(sParts.y)}</select>
+                   </div>
+                </div>
+
+                <!-- End Date Group -->
+                <div class="form-group" style="margin-bottom:0;">
+                   <label style="font-size:0.8rem; margin-bottom: 8px; display:block;">End Date</label>
+                   <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                       <select class="edu-end-month input-dropdown" style="padding: 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.2); color: white;">${genMonths(eParts.m)}</select>
+                       <select class="edu-end-year input-dropdown" style="padding: 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.2); color: white;">${genYears(eParts.y)}</select>
+                   </div>
+                </div>
+            </div>
+
+            <button type="button" onclick="removeCard(this)" style="position: absolute; top: 15px; right: 15px; background: none; border: none; color: #ff6b6b; cursor: pointer; padding: 5px;">
+                <i class="fas fa-trash"></i>
+            </button>
+        `;
+        return div;
+    }
+
+
     // Load current profile
     try {
-        const res = await authFetch(`${API_BASE}/profile`);
-        const user = await res.json();
+        const user = await fetchUserProfile();
         currentProfile = user.profile_data || {};
 
         // Fill form fields
@@ -1220,38 +1647,53 @@ async function initProfilePage() {
 
             // Render Experience
             const expContainer = document.getElementById("experience-list");
-            if (expContainer && p.experience && p.experience.length > 0) {
-                expContainer.innerHTML = p.experience.map(e => `
-                    <div class="experience-card">
-                        <div class="card-header">
-                            <strong class="card-title">${e.title || 'Role'}</strong>
-                            <span class="card-meta">${e.duration || ''}</span>
-                        </div>
-                        <div class="card-subtitle">${e.company || 'Company'}</div>
-                        <p class="card-body">${e.responsibilities || ''}</p>
-                    </div>
-                `).join("");
+            if (expContainer) {
+                expContainer.innerHTML = ""; // Clear
+                (p.experience || []).forEach(e => {
+                    expContainer.appendChild(createExperienceCard(e));
+                });
+
+                // Add "Add" button
+                const addBtn = document.createElement("button");
+                addBtn.type = "button";
+                addBtn.className = "btn-secondary";
+                addBtn.innerHTML = '<i class="fas fa-plus"></i> Add Position';
+                addBtn.style.marginTop = "10px";
+                addBtn.onclick = window.addExperience;
+
+                // Let's modify HTML structure via JS for now safely:
+                // Check if button already exists in parent
+                const existingBtn = expContainer.parentElement.querySelector(".add-experience-btn");
+                if (!existingBtn) {
+                    addBtn.classList.add("add-experience-btn");
+                    expContainer.parentNode.insertBefore(addBtn, expContainer.nextSibling);
+                }
             }
 
             // Render Education
             const eduContainer = document.getElementById("education-list");
-            if (eduContainer && p.education && p.education.length > 0) {
-                eduContainer.innerHTML = p.education.map(e => `
-                    <div class="experience-card">
-                        <div class="card-header">
-                            <strong class="card-title">${e.school || 'School'}</strong>
-                            <span class="card-subtitle">${e.date || ''}</span>
-                        </div>
-                        <div class="card-body">${e.degree || 'Degree'}</div>
-                    </div>
-                `).join("");
+            if (eduContainer) {
+                eduContainer.innerHTML = "";
+                (p.education || []).forEach(e => {
+                    eduContainer.appendChild(createEducationCard(e));
+                });
+
+                // Add "Add" button
+                const existingBtn = eduContainer.parentElement.querySelector(".add-education-btn");
+                if (!existingBtn) {
+                    const addBtn = document.createElement("button");
+                    addBtn.type = "button";
+                    addBtn.className = "btn-secondary";
+                    addBtn.innerHTML = '<i class="fas fa-plus"></i> Add Education';
+                    addBtn.style.marginTop = "10px";
+                    addBtn.classList.add("add-education-btn");
+                    addBtn.onclick = window.addEducation;
+                    eduContainer.parentNode.insertBefore(addBtn, eduContainer.nextSibling);
+                }
             }
         }
 
         // Populate Resume Dropdown
-        // Note: Currently no endpoint lists all resumes separately?
-        // We can just add the primary one if we don't have a list endpoint.
-        // Assuming we rely on primary_resume_name for now.
         if (user.primary_resume_name) {
             resumeSelect.innerHTML = "";
             const opt = document.createElement("option");
@@ -1273,7 +1715,7 @@ async function initProfilePage() {
             const selectedResume = resumeSelect.value;
 
             if (!selectedResume) {
-                alert("Please select a resume first.");
+                showToast("Please select a resume first.", "warning");
                 return;
             }
 
@@ -1291,11 +1733,11 @@ async function initProfilePage() {
                     // Reload the page to show updated data
                     window.location.reload();
                 } else {
-                    alert("Failed to parse resume. Please try again.");
+                    showToast("Failed to parse resume. Please try again.", "error");
                 }
             } catch (e) {
                 console.error("Parse error:", e);
-                alert("Error parsing resume.");
+                showToast("Error parsing resume.", "error");
             } finally {
                 autoFillBtn.disabled = false;
                 autoFillBtn.innerHTML = '<i class="fas fa-magic"></i> Auto-Fill from Resume';
@@ -1312,11 +1754,50 @@ async function initProfilePage() {
             const saveBtn = document.getElementById("save-btn");
             const statusMsg = document.getElementById("status-msg");
 
+            // Scrape Experience
+            const experience = [];
+            document.querySelectorAll("#experience-list .experience-card").forEach(card => {
+                const sM = card.querySelector(".exp-start-month")?.value || "";
+                const sY = card.querySelector(".exp-start-year")?.value || "";
+                const eM = card.querySelector(".exp-end-month")?.value || "";
+                const eY = card.querySelector(".exp-end-year")?.value || "";
+
+                const s = (sM && sY) ? `${sM} ${sY}` : (sM || sY || card.querySelector(".exp-start")?.value || "");
+                const e = (eM && eY) ? `${eM} ${eY}` : (eM || eY || card.querySelector(".exp-end")?.value || "");
+
+                experience.push({
+                    title: card.querySelector(".exp-title").value,
+                    company: card.querySelector(".exp-company").value,
+                    start_date: s,
+                    end_date: e,
+                    responsibilities: card.querySelector(".exp-desc").value
+                });
+            });
+
+            // Scrape Education
+            const education = [];
+            document.querySelectorAll("#education-list .experience-card").forEach(card => {
+                const sM = card.querySelector(".edu-start-month")?.value || "";
+                const sY = card.querySelector(".edu-start-year")?.value || "";
+                const eM = card.querySelector(".edu-end-month")?.value || "";
+                const eY = card.querySelector(".edu-end-year")?.value || "";
+
+                const s = (sM && sY) ? `${sM} ${sY}` : (sM || sY || card.querySelector(".edu-start")?.value || "");
+                const e = (eM && eY) ? `${eM} ${eY}` : (eM || eY || card.querySelector(".edu-end")?.value || "");
+
+                education.push({
+                    school: card.querySelector(".edu-school").value,
+                    degree: card.querySelector(".edu-degree").value,
+                    start_date: s,
+                    end_date: e
+                });
+            });
+
             // Collect form data and merge with existing profile data
             const formData = {
                 full_name: document.getElementById("full_name")?.value || "",
                 profile_data: {
-                    ...currentProfile, // MERGE existing data (experience, education, etc.)
+                    ...currentProfile,
                     name: document.getElementById("full_name")?.value || "",
                     phone: document.getElementById("phone")?.value || "",
                     linkedin: document.getElementById("linkedin")?.value || "",
@@ -1329,7 +1810,9 @@ async function initProfilePage() {
                     race: document.getElementById("race")?.value || "",
                     veteran: document.getElementById("veteran")?.value || "",
                     disability: document.getElementById("disability")?.value || "",
-                    authorization: document.getElementById("authorization")?.value || ""
+                    authorization: document.getElementById("authorization")?.value || "",
+                    experience: experience,
+                    education: education
                 }
             };
 
@@ -1529,8 +2012,7 @@ async function loadResumesForModal() {
         const resumes = await resumesRes.json();
 
         // Fetch Current Profile to see active one
-        const profileRes = await authFetch(`${API_BASE}/profile`);
-        const profile = await profileRes.json();
+        const profile = await fetchUserProfile();
         const currentResume = profile.primary_resume_name;
 
         listContainer.innerHTML = "";
@@ -1617,9 +2099,7 @@ async function initJobsPage() {
         // Use cached profile if available
         let profile = window.currentUserProfile;
         if (!profile) {
-            const profRes = await authFetch(`${API_BASE}/profile`);
-            profile = await profRes.json();
-            window.currentUserProfile = profile;
+            profile = await fetchUserProfile();
         }
 
         const primary = profile.primary_resume_name;
@@ -1796,7 +2276,7 @@ async function loadJobs(resumeName, page = 1) {
                         openApplyModal(lead, resumeName);
                     } catch (err) {
                         console.error("Error opening apply modal:", err);
-                        alert("Error opening apply modal: " + err.message);
+                        showToast("Error opening apply modal: " + err.message, "error");
                     }
                 });
             }
@@ -1886,11 +2366,11 @@ async function deleteLead(leadId, rowElement) {
             rowElement.remove();
             // Optional: Show toast
         } else {
-            alert("Failed to delete lead.");
+            showToast("Failed to delete lead.", "error");
         }
     } catch (e) {
         console.error("Error deleting lead:", e);
-        alert("Error deleting lead.");
+        showToast("Error deleting lead.", "error");
     }
 }
 
@@ -1941,8 +2421,7 @@ let availableLeads = [];
 async function fetchLeadsForMentions() {
     try {
         // Get active resume context
-        const profileRes = await authFetch(`${API_BASE}/profile`);
-        const profile = await profileRes.json();
+        const profile = await fetchUserProfile();
         const resumeName = profile.primary_resume_name;
 
         if (!resumeName) return;
@@ -2137,7 +2616,7 @@ sendMessage = async function () {
             }
         } catch (e) {
             console.error("Error in Apply Interception:", e);
-            alert("Unexpected error opening apply modal. Check console.");
+            showToast("Unexpected error opening apply modal.", "error");
             // Fallback: Restore text so they can try again or send as normal message
             chatInput.value = text;
         }
@@ -2390,7 +2869,7 @@ async function confirmApplyToChat() {
     });
 
     if (!selectedResume) {
-        alert("Please select a resume");
+        showToast("Please select a resume", "warning");
         return;
     }
 
