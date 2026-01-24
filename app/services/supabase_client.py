@@ -18,9 +18,8 @@ class SupabaseService:
             print("⚠️ Warning: SUPABASE_URL or SUPABASE_KEY not found in .env")
             self.client = None
         else:
-            # Ensure trailing slash for storage endpoint compatibility
-            url = SUPABASE_URL if SUPABASE_URL.endswith("/") else f"{SUPABASE_URL}/"
-            self.client: Client = create_client(url, SUPABASE_KEY)
+            # Passing SUPABASE_URL as-is to avoid "Storage endpoint URL should have a trailing slash" warning
+            self.client: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
         
         # Cache: Key = f"{user_id}_{resume_filename}" -> Value = (List[Dict], timestamp)
         self.leads_cache = {}

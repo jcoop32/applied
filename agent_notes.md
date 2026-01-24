@@ -161,4 +161,12 @@
 2. **RLS Policies:** Since we use **custom Integer IDs** (not standard Supabase UUIDs), we must extract the ID from the JWT claims.
    *   Policy: `CREATE POLICY "Enable read for users" ON "public"."profiles" AS PERMISSIVE FOR SELECT TO authenticated USING ((auth.jwt() ->> 'id')::bigint = user_id);`
 
+## User Report: 2026-01-22 (Cloud Dispatch Error)
+**Error:** `Execution Mode 'cloud_run' requested but Cloud Dispatch failed or not configured.` in Cloud Run logs.
+**Root Cause:** The `agent_runner.py` script has a safety check to prevent local execution when `execution_mode` is 'cloud_run', relying on the `IS_CLOUD_WORKER` environment variable. This variable was missing from the `Dockerfile` and Cloud Run configuration, causing the worker to misidentify itself as a local environment and block execution.
+**Fix Strategy:**
+1. Removed `ENV IS_CLOUD_WORKER=true` from `Dockerfile` (caused local execution issue).
+2. Updated `deploy.sh` to set `IS_CLOUD_WORKER=true` via `--update-env-vars` purely for the Cloud Run instance.
+3. Redeploy the Cloud Run service.
+
 

@@ -55,8 +55,9 @@ def update_research_status(user_id: int, resume_filename: str, status: str, last
         except Exception as e:
             if attempt < 2:
                 print(f"⚠️ Failed to update research status (Attempt {attempt+1}/3): {e}. Retrying...")
+                print(f"⚠️ Failed to update research status (Attempt {attempt+1}/3): {e}. Retrying in 2s...")
                 import time
-                time.sleep(0.5)
+                time.sleep(2.0)
             else:
                 logger.error(f"Failed to update research status: {e}")
 
@@ -94,6 +95,14 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
     
     # Cloud Dispatch Check
     cloud_url = os.getenv("CLOUD_RUN_URL")
+    
+    # Debug Logging for Dispatch Decision
+    if allow_dispatch:
+        if not cloud_url:
+            print("⚠️ Cloud Dispatch Skipped: CLOUD_RUN_URL not set in environment.")
+        elif os.getenv("IS_CLOUD_WORKER"):
+             print("ℹ️ Cloud Dispatch Skipped: Already running in Cloud Worker.")
+             
     if allow_dispatch and cloud_url and not os.getenv("IS_CLOUD_WORKER"):
         import httpx
         print(f"🚀 Dispatching Research task to Cloud Worker: {cloud_url}")

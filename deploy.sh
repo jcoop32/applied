@@ -20,6 +20,7 @@ gcloud run deploy $SERVICE_NAME \
   --memory 4Gi \
   --cpu 4 \
   --timeout 3600 \
-  --concurrency 1
+  --concurrency 1 \
+  --update-env-vars IS_CLOUD_WORKER=true
 
 echo "✅ Deployment complete!"
