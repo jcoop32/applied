@@ -4,6 +4,7 @@ import requests
 import re
 from urllib.parse import urlparse
 from google import genai
+import camoufox
 from playwright.async_api import async_playwright
 
 KNOWN_ATS = ["greenhouse.io", "lever.co", "workday.com", "ashbyhq.com", "bamboohr.com", "smartrecruiters.com", "icims.com"]
@@ -23,8 +24,9 @@ class UrlResolver:
         
         try:
             async with async_playwright() as p:
-                browser = await p.chromium.launch(
+                browser = await p.firefox.launch(
                     headless=self.headless,
+                    executable_path=camoufox.executable_path(),
                     args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-infobars"]
                 )
                 context = await browser.new_context(

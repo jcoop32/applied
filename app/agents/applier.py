@@ -242,8 +242,19 @@ class ApplierAgent:
                          await log_stream_manager.broadcast(str(session_id), link_msg, type="log")
             except Exception as e:
                 print(f"could not extract session url: {e}")
+
         else:
-            browser = Browser(headless=self.headless)
+            # Custom Browser Subclass for Camoufox
+            class CamoufoxBrowser(Browser):
+                async def get_playwright_browser(self, playwright):
+                    import camoufox
+                    return await playwright.firefox.launch(
+                        headless=self.config.headless,
+                        executable_path=camoufox.executable_path(),
+                        args=["--disable-blink-features=AutomationControlled", "--no-sandbox"]
+                    )
+            
+            browser = CamoufoxBrowser(headless=self.headless)
 
         async def ask_user_tool(prompt: str) -> str:
             """

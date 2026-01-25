@@ -12,3 +12,4 @@ google-genai
 browser-use
 python-jose
 bcrypt
+camoufox
