@@ -256,8 +256,8 @@ async function loadSessions() {
         const container = document.getElementById("chat-history-list");
         if (!container) return;
 
-        // Remove only dynamically added session items, keep the static "Current Session"
-        container.querySelectorAll(".session-item").forEach(item => item.remove());
+        // Clear all session items
+        container.innerHTML = '';
 
         // Add session items
         sessions.forEach(session => {
@@ -502,8 +502,9 @@ async function loadSession(sessionId) {
 
         setTimeout(scrollToBottom, 100);
 
-        // Connect to Live Log Stream
+        // Connect to Live Log Stream & Database Realtime
         connectLogStream(sessionId);
+        subscribeToChatMessages(sessionId);
 
     } catch (e) {
         console.error(e);
@@ -1089,6 +1090,40 @@ async function initRealtime() {
     }
 }
 
+let currentChatChannel = null;
+
+function subscribeToChatMessages(sessionId) {
+    if (!sessionId || !supabaseClient) return;
+
+    // Unsubscribe previous
+    if (currentChatChannel) {
+        supabaseClient.removeChannel(currentChatChannel);
+        currentChatChannel = null;
+    }
+
+    console.log(`🔌 Subscribing to Chat Session: ${sessionId}`);
+
+    currentChatChannel = supabaseClient
+        .channel(`chat:${sessionId}`)
+        .on('postgres_changes', {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'chat_messages',
+            filter: `session_id=eq.${sessionId}`
+        }, (payload) => {
+            console.log("💬 Realtime Message:", payload);
+            const msg = payload.new;
+            if (msg.role === 'model') {
+                addMessage('model', msg.content, false);
+                scrollToBottom();
+            }
+        })
+        .subscribe((status) => {
+            console.log(`💬 Chat Channel Status: ${status}`);
+        });
+}
+
+
 async function updateResearchUI(profileData) {
     if (!profileData) return;
 
@@ -1098,11 +1133,33 @@ async function updateResearchUI(profileData) {
 
     btns.forEach(btn => {
         if (!hasResume) {
-            btn.style.display = "none";
-            return;
+            btn.disabled = true;
+            btn.title = "Upload a resume first";
+        } else {
+            btn.disabled = false;
+            btn.title = "Find Jobs";
         }
-        btn.style.display = "inline-flex";
     });
+
+    // 2. Realtime Status Pills
+    // If profileData is actually a Lead object (from realtime update), handle it
+    if (profileData.status && profileData.id) {
+        const card = document.getElementById(`lead-card-${profileData.id}`);
+        if (card) {
+            const pill = card.querySelector('.status-pill');
+            if (pill) {
+                pill.textContent = profileData.status;
+                // Reset classes
+                pill.className = 'status-pill';
+                // Re-apply style
+                if (profileData.status === "APPLIED") pill.classList.add("status-applied");
+                else if (profileData.status === "IN_PROGRESS") pill.classList.add("status-in-progress");
+                else pill.classList.add("status-new");
+            }
+        }
+    }
+
+
 
     // 2. Check Research Status
     // profileData.profile_data might be JSON string or object depending on source
@@ -2230,6 +2287,7 @@ async function loadJobs(resumeName, page = 1) {
         leads.forEach(lead => {
             const div = document.createElement("div");
             div.className = "job-item";
+            div.id = `lead-card-${lead.id}`; // Realtime Hook
 
             // Determine Status Color
             let statusClass = "status-new";
@@ -2904,32 +2962,14 @@ async function confirmApplyToChat() {
 
         if (res.ok) {
             const data = await res.json();
-            let msg = "✅ Application started.";
-            if (data.session_url) msg += `\n\n🔗 [Watch Live](${data.session_url})`;
-
-            // If we are on CHAT page, just add message
-            // If we are on JOBS page (or other), REDIRECT to CHAT page with session_id
             if (data.session_id) {
-                const currentPath = window.location.pathname;
-                if (currentPath === "/" || currentPath.includes("index.html")) {
-                    // We are on chat page, just ensuring we are on correct session?
-                    // Usually initApplyModal is global. 
-                    // If we started a NEW session (which this API does typically if not passed), we should switch to it.
-                    // The API /agents/apply creates a session if we passed one? 
-                    // Wait, confirmApplyToChat logic doesn't pass session_id in payload above!
-                    // The API creates a NEW session if one isn't passed? run_applier_task takes session_id.
-                    // Check /agents/apply endpoint. It creates a new one!
-
-                    addCancelButtonMessage(data.session_id);
-                    loadSession(data.session_id);
-                } else {
-                    // Redirect
-                    window.location.href = `/?session_id=${data.session_id}`;
-                }
+                // Redirect to the new session using the clean URL
+                window.location.href = `/chat/${data.session_id}`;
             } else {
+                let msg = "✅ Application started.";
+                if (data.session_url) msg += `\n\n🔗 [Watch Live](${data.session_url})`;
                 addMessage("model", msg);
             }
-
         } else {
             addMessage("model", "❌ Failed to start application.");
         }

@@ -399,6 +399,8 @@ class ApplierAgent:
                 except: pass
             
             try:
+                # FIX: Wait for background tasks (CDP cleanup)
+                await asyncio.sleep(2.0)
                 if hasattr(browser, 'close'):
                     await browser.close()
             except Exception:

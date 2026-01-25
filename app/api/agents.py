@@ -226,7 +226,7 @@ async def trigger_apply(
     if session_id:
          task_manager.register_task(str(session_id), task)
 
-    return {"message": "Application started (Local)"}
+    return {"message": "Application started (Local)", "session_id": session_id}
 
 @router.post("/cancel/{session_id}")
 async def cancel_agent_task(
