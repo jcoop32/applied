@@ -1764,6 +1764,126 @@ async function initProfilePage() {
 
     } catch (e) { console.error(e); }
 
+    // --- Job Titles Management ---
+    let currentJobTitles = [];
+
+    function renderJobTitles(titles) {
+        currentJobTitles = titles || [];
+        const container = document.getElementById("job-titles-container");
+        const emptyMsg = document.getElementById("job-titles-empty");
+        if (!container) return;
+
+        container.innerHTML = "";
+
+        if (currentJobTitles.length === 0) {
+            const empty = document.createElement("span");
+            empty.id = "job-titles-empty";
+            empty.style.cssText = "color: var(--text-secondary); font-style: italic;";
+            empty.textContent = "No job titles set. Parse a resume or add manually.";
+            container.appendChild(empty);
+            return;
+        }
+
+        currentJobTitles.forEach((title, idx) => {
+            const chip = document.createElement("span");
+            chip.className = "job-title-chip";
+            chip.innerHTML = `${title}<span class="remove-chip" data-idx="${idx}" title="Remove">&times;</span>`;
+            chip.querySelector(".remove-chip").addEventListener("click", () => removeJobTitle(idx));
+            container.appendChild(chip);
+        });
+    }
+
+    async function removeJobTitle(idx) {
+        const removed = currentJobTitles[idx];
+        currentJobTitles.splice(idx, 1);
+        renderJobTitles(currentJobTitles);
+
+        try {
+            await authFetch(`${API_BASE}/profile/job-titles`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ titles: currentJobTitles })
+            });
+            showToast(`Removed "${removed}"`, "info");
+        } catch (e) {
+            console.error("Remove title error:", e);
+        }
+    }
+
+    async function addJobTitle() {
+        const input = document.getElementById("add-title-input");
+        const title = input.value.trim();
+        if (!title) return;
+        if (currentJobTitles.length >= 10) {
+            showToast("Maximum 10 titles allowed.", "warning");
+            return;
+        }
+        if (currentJobTitles.map(t => t.toLowerCase()).includes(title.toLowerCase())) {
+            showToast("Title already exists.", "warning");
+            return;
+        }
+
+        currentJobTitles.push(title);
+        input.value = "";
+        renderJobTitles(currentJobTitles);
+
+        try {
+            await authFetch(`${API_BASE}/profile/job-titles`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ titles: currentJobTitles })
+            });
+            showToast(`Added "${title}"`, "info");
+        } catch (e) {
+            console.error("Add title error:", e);
+        }
+    }
+
+    // Wire up Add button and Enter key
+    const addTitleBtn = document.getElementById("add-title-btn");
+    const addTitleInput = document.getElementById("add-title-input");
+    if (addTitleBtn) addTitleBtn.addEventListener("click", addJobTitle);
+    if (addTitleInput) addTitleInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); addJobTitle(); }
+    });
+
+    // Wire up Regenerate button
+    const regenBtn = document.getElementById("regenerate-titles-btn");
+    if (regenBtn) {
+        regenBtn.addEventListener("click", async () => {
+            regenBtn.disabled = true;
+            regenBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
+
+            try {
+                const res = await authFetch(`${API_BASE}/profile/job-titles/regenerate`, {
+                    method: "POST"
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    renderJobTitles(data.target_job_titles || []);
+                    showToast(`Generated ${(data.target_job_titles || []).length} job titles!`, "info");
+                } else {
+                    showToast("Failed to regenerate titles.", "error");
+                }
+            } catch (e) {
+                console.error("Regenerate error:", e);
+                showToast("Error regenerating titles.", "error");
+            } finally {
+                regenBtn.disabled = false;
+                regenBtn.innerHTML = '<i class="fas fa-magic"></i> Regenerate with AI';
+            }
+        });
+    }
+
+    // Load existing titles
+    try {
+        const profileRes = await authFetch(`${API_BASE}/profile`);
+        if (profileRes.ok) {
+            const profileData = await profileRes.json();
+            renderJobTitles(profileData.target_job_titles || []);
+        }
+    } catch (e) { console.error("Load titles error:", e); }
+
     if (autoFillBtn) {
         autoFillBtn.addEventListener("click", async (e) => {
             e.preventDefault();

@@ -93,6 +93,55 @@
             min-height: 200px;
             font-size: 0.9rem;
         }
+
+        /* Job Title Chips */
+        .job-title-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 14px;
+            border-radius: 20px;
+            background: rgba(139, 92, 246, 0.15);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            color: #c4b5fd;
+            font-size: 0.88rem;
+            font-weight: 500;
+            backdrop-filter: blur(8px);
+            transition: all 0.2s ease;
+            animation: chipFadeIn 0.3s ease;
+        }
+
+        .job-title-chip:hover {
+            background: rgba(139, 92, 246, 0.25);
+            border-color: rgba(139, 92, 246, 0.5);
+            box-shadow: 0 0 12px rgba(139, 92, 246, 0.15);
+        }
+
+        .job-title-chip .remove-chip {
+            display: inline-flex;
+            cursor: pointer;
+            color: rgba(255, 255, 255, 0.4);
+            font-size: 1rem;
+            line-height: 1;
+            padding: 0 2px;
+            transition: color 0.2s;
+        }
+
+        .job-title-chip .remove-chip:hover {
+            color: #ff6b6b;
+        }
+
+        @keyframes chipFadeIn {
+            from {
+                opacity: 0;
+                transform: scale(0.9);
+            }
+
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
     </style>
 </head>
 
@@ -242,6 +291,33 @@
                                     <option value="Visa">Visa Sponsorship Needed</option>
                                 </select>
                             </div>
+                        </div>
+
+                        <!-- Target Job Titles Section -->
+                        <h3
+                            style="margin-top:30px; margin-bottom: 15px; color: var(--accent-color); font-size: 1rem; text-transform: uppercase; letter-spacing: 0.05em;">
+                            🎯 Target Job Titles
+                        </h3>
+                        <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 15px;">
+                            These titles are used by the researcher to find diverse job leads. Auto-generated from your
+                            resume, or add your own.
+                        </p>
+                        <div id="job-titles-container"
+                            style="display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 15px; min-height: 40px; padding: 12px; border-radius: 10px; border: 1px solid var(--glass-border); background: rgba(0,0,0,0.15);">
+                            <span style="color: var(--text-secondary); font-style: italic;"
+                                id="job-titles-empty">Loading titles...</span>
+                        </div>
+                        <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px;">
+                            <input type="text" id="add-title-input" placeholder="Add a custom title..."
+                                style="flex: 1; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--glass-border); background: var(--input-bg, rgba(0,0,0,0.2)); color: var(--text-primary); font-family: inherit;">
+                            <button type="button" id="add-title-btn" class="btn-secondary"
+                                style="white-space: nowrap; height: 42px;">
+                                <i class="fas fa-plus"></i> Add
+                            </button>
+                            <button type="button" id="regenerate-titles-btn" class="btn-secondary"
+                                style="white-space: nowrap; height: 42px;">
+                                <i class="fas fa-magic"></i> Regenerate with AI
+                            </button>
                         </div>
 
                         <h3

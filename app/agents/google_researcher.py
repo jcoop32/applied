@@ -17,7 +17,7 @@ class GoogleResearcherAgent:
         self.model_id = 'gemini-2.5-flash'
         # Try to pass max_output_tokens directly if supported, otherwise rely on defaults or model_kwargs
         # Common Langchain wrapper accepts max_output_tokens
-        self.llm = ChatGoogle(model='gemini-2.5-flash', api_key=api_key, max_output_tokens=8192)
+        self.llm = ChatGoogle(model='gemini-2.5-flash', api_key=api_key, max_output_tokens=16384, thinking_budget=0)
         self.seen_jobs: Set[str] = set()
         
         # Valid ATS Domains to target for "Verified" jobs
@@ -34,69 +34,21 @@ class GoogleResearcherAgent:
         import logging
         logging.getLogger("browser_use").setLevel(logging.WARNING)
 
-    async def _generate_titles(self, profile: dict) -> List[str]:
-        """
-        Generates professional job titles based on the candidate profile.
-        """
-        print("🧠 GoogleResearcher: Analyzing profile for target Job Titles...")
-
-        if not profile:
-            return ["Software Engineer"]
-
-        raw_text_snippet = profile.get('raw_text', '')[:1000]
-        
-        prompt = f"""
-        Act as an expert Recruiter. Analyze this candidate profile:
-        {json.dumps(profile, indent=2)}
-        
-        Raw Text Context:
-        {raw_text_snippet}
-
-        Task:
-        1. Identify the candidate's core Role Name (e.g. "Software Engineer", "Product Manager").
-        2. Identify their Level (Senior, Staff, Intern, etc).
-        3. Generate 3-5 distinct, professional Job Titles they should target.
-           - Rule: Combine Role + Level (e.g. "Software Engineer Intern", "Senior Backend Developer").
-           - Rule: NEVER output single-word titles like "Intern", "Manager", "Analyst". Be specific.
-           - Rule: If the candidate is a student/intern, include "Intern" or "Co-op".
-        4. Titles must be concise (max 4 words).
-        
-        Output ONLY a JSON list of strings (e.g. ["Senior Software Engineer", "Backend Developer"]).
-        """
-
-        try:
-            response = self.client.models.generate_content(
-                model=self.model_id,
-                contents=prompt,
-                config={'response_mime_type': 'application/json'}
-            )
-            titles = json.loads(response.text)
-            
-            # Clean titles
-            cleaned_titles = []
-            for t in titles:
-                 clean = re.sub(r'[()\"\'\[\]]', '', t).strip()
-                 if clean and ' ' in clean: 
-                     cleaned_titles.append(clean)
-                 elif clean and len(clean.split()) > 1:
-                     cleaned_titles.append(clean)
-            
-            return cleaned_titles[:6] # Limit to top 6
-
-        except Exception as e:
-            print(f"⚠️ Strategy Generation Error: {e}")
-            return ["Software Engineer"]
+    # NOTE: _generate_titles() has been removed.
+    # Title generation is now handled by JobTitleAgent.
+    # The agent_runner passes a specific job_title to gather_leads().
 
     async def gather_leads(self, profile: dict, limit: int = 15, job_title: str = None, location: str = None, should_stop_callback=None, log_callback=None) -> List[Dict[str, Any]]:
         """
         Executes Google Search queries to find direct ATS links.
         Loops through search strategies until 'limit' is reached or options exhausted.
         """
-        # 1. Get Target Titles
-        if job_title:
-            titles = [job_title]
-        else:
-            titles = await self._generate_titles(profile)
+        # 1. Get Target Title (passed from agent_runner, one per instance)
+        if not job_title:
+            # Fallback: should not normally happen, runner always passes a title
+            print("⚠️ GoogleResearcher: No job_title provided, using fallback.")
+            job_title = "Software Engineer"
+        titles = [job_title]
 
         # 2. Setup Loop
         all_leads = []

@@ -193,3 +193,20 @@
 1. Split configuration into `SUPABASE_ANON_KEY` (Frontend/Client) and `SUPABASE_SERVICE_ROLE_KEY` (Backend/Admin).
 2. Updated `auth.py` to serve `SUPABASE_ANON_KEY` to the frontend via `/config`.
 3. Updated `supabase_client.py` to use `SUPABASE_SERVICE_ROLE_KEY` for backend operations.
+
+## User Report: 2026-02-08 (Research Agent MAX_TOKENS)
+**Error:** `finish_reason=MAX_TOKENS` → `Unterminated string` JSON parse error → `LLM call timed out after 45 seconds`.
+**Root Cause:** Gemini 2.5 Flash uses "thinking" tokens by default. With `max_output_tokens=8192` and no explicit `thinking_budget`, the model allocated ~7861 tokens to internal chain-of-thought reasoning, leaving only ~316 tokens for the actual JSON output. The truncated JSON caused an `Unterminated string` parse error. The `browser-use` `ChatGoogle` wrapper has a code path that sets `thinking_budget=0` by default for flash models, but this only fires inside `ainvoke()` and may not apply across all `browser-use` or Docker versions.
+**Fix Strategy:**
+1.  Explicitly set `thinking_budget=0` in the `ChatGoogle` constructor in `GoogleResearcherAgent.__init__` to guarantee thinking is disabled for extraction tasks.
+2.  Increased `max_output_tokens` from 8192 to 16384 as a safety buffer.
+
+## Internal Issue: Job Title Architecture Refactor (2026-02-08)
+**Context:** `_generate_titles()` in `GoogleResearcherAgent` ran an LLM call on every search, producing inconsistent ad-hoc titles.
+**Change:** Replaced with persistent `target_job_titles` (text[] on `profiles` table). New `JobTitleAgent` generates titles once on resume parse. `agent_runner.py` now fans out N parallel `GoogleResearcherAgent` instances (one per title) via `asyncio.gather()`, each with `budget = ceil(limit / N)`. Results are merged and deduped before passing to Matcher.
+**Key Files:**
+- `app/agents/job_title_agent.py` — New agent
+- `app/agents/google_researcher.py` — `_generate_titles()` removed, now single-title specialist
+- `app/services/agent_runner.py` — Parallel fan-out/fan-in orchestration
+- `app/services/supabase_client.py` — `get_job_titles()`, `update_job_titles()`
+- `app/api/profile.py` — `PATCH /job-titles`, `POST /job-titles/regenerate`

@@ -2,10 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException, Body
 from app.api.auth import get_current_user
 from app.services.supabase_client import supabase_service
 from app.utils.resume_parser import ResumeParser
+from app.agents.job_title_agent import JobTitleAgent
 import os
 import json
+import asyncio
 import tempfile
 from datetime import datetime
+from typing import List
 
 
 
@@ -169,6 +172,19 @@ async def parse_resume(
 
         supabase_service.update_user_profile(user_id, update_payload)
 
+        # 7. Auto-Generate Job Titles (fire-and-forget background task)
+        async def _generate_titles_bg():
+            try:
+                title_agent = JobTitleAgent(api_key=GEMINI_API_KEY)
+                titles = await title_agent.generate_titles(merged_data)
+                if titles:
+                    supabase_service.update_job_titles(user_id, titles)
+                    print(f"🎯 Auto-generated {len(titles)} job titles for user {user_id}")
+            except Exception as te:
+                print(f"⚠️ Background title generation failed: {te}")
+
+        asyncio.create_task(_generate_titles_bg())
+
         return update_payload
 
     except Exception as e:
@@ -218,4 +234,67 @@ async def generate_resume_summary(
 
     except Exception as e:
         print(f"Summary Generation Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/job-titles")
+async def update_job_titles(
+    data: dict = Body(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Update the user's target job titles.
+    Body: { "titles": ["Software Engineer", "Backend Developer", ...] }
+    """
+    user_id = current_user['id']
+    titles = data.get("titles")
+
+    if titles is None or not isinstance(titles, list):
+        raise HTTPException(status_code=400, detail="'titles' must be a list of strings.")
+
+    # Validate: max 10 titles, each must be a non-empty string
+    clean_titles = [t.strip() for t in titles if isinstance(t, str) and t.strip()]
+    if len(clean_titles) > 10:
+        raise HTTPException(status_code=400, detail="Maximum 10 job titles allowed.")
+
+    try:
+        updated = supabase_service.update_job_titles(user_id, clean_titles)
+        return {"target_job_titles": updated}
+    except Exception as e:
+        print(f"Job Titles Update Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/job-titles/regenerate")
+async def regenerate_job_titles(
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Re-runs the JobTitleAgent to regenerate titles from the user's profile data.
+    """
+    user_id = current_user['id']
+
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=503, detail="AI service unavailable (Missing API Key)")
+
+    try:
+        # Fetch existing profile data
+        profile = supabase_service.get_user_profile(user_id)
+        profile_data = profile.get("profile_data", {}) if profile else {}
+
+        if not profile_data:
+            raise HTTPException(status_code=400, detail="No resume data found. Please parse a resume first.")
+
+        title_agent = JobTitleAgent(api_key=GEMINI_API_KEY)
+        titles = await title_agent.generate_titles(profile_data)
+
+        if titles:
+            supabase_service.update_job_titles(user_id, titles)
+
+        return {"target_job_titles": titles}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Regenerate Titles Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

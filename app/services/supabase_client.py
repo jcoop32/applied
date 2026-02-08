@@ -584,6 +584,46 @@ class SupabaseService:
 
 
     
+    # --- Job Titles ---
+    def get_job_titles(self, user_id: int) -> list:
+        """
+        Fetches the target_job_titles array from the user's profile.
+        Returns an empty list if not set.
+        """
+        if not self.client:
+            return []
+        try:
+            response = self.client.table("profiles")\
+                .select("target_job_titles")\
+                .eq("user_id", user_id)\
+                .execute()
+            if response.data:
+                return response.data[0].get("target_job_titles") or []
+            return []
+        except Exception as e:
+            print(f"❌ Supabase Get Job Titles Error: {e}")
+            return []
+
+    def update_job_titles(self, user_id: int, titles: list) -> list:
+        """
+        Replaces the target_job_titles array on the user's profile.
+        Used by both the JobTitleAgent (auto-gen) and manual edits.
+        """
+        if not self.client:
+            raise Exception("Supabase client not initialized")
+        try:
+            response = self.client.table("profiles")\
+                .update({"target_job_titles": titles})\
+                .eq("user_id", user_id)\
+                .execute()
+            if response.data:
+                self.clear_user_cache(user_id)
+                return response.data[0].get("target_job_titles", [])
+            return titles
+        except Exception as e:
+            print(f"❌ Supabase Update Job Titles Error: {e}")
+            raise e
+
     # --- Chat Persistence ---
     def get_pending_leads(self, user_id: int):
         """

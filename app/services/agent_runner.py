@@ -206,33 +206,93 @@ async def run_research_pipeline(user_id: int, resume_filename: str, api_key: str
         # CANCELLATION CHECK
         if await check_cancellation(user_id, resume_filename): raise asyncio.CancelledError()
 
-        # 3. Research
-        print("🔎 Using Google Verification Agent...")
-        await log(f"Searching Google for top {limit} jobs (this may take a moment)...")
-        researcher = GoogleResearcherAgent(api_key=api_key)
+        # 3. Resolve Target Job Titles
+        # Priority: chat override > persisted DB titles > auto-generate via JobTitleAgent
+        if job_title:
+            # User specified a single title via chat (backward compat)
+            titles = [job_title]
+            print(f"🎯 Using chat-specified title: {job_title}")
+        else:
+            # Fetch persisted titles from profile
+            titles = supabase_service.get_job_titles(user_id)
+            
+            if not titles:
+                # Auto-generate using JobTitleAgent
+                await log("No job titles found. Analyzing resume to generate target titles...")
+                from app.agents.job_title_agent import JobTitleAgent
+                title_agent = JobTitleAgent(api_key=api_key)
+                titles = await title_agent.generate_titles(profile_blob)
+                
+                if titles:
+                    supabase_service.update_job_titles(user_id, titles)
+                    print(f"🎯 Auto-generated and saved {len(titles)} job titles")
+                else:
+                    titles = ["Software Engineer"]  # Ultimate fallback
+            else:
+                print(f"🎯 Using {len(titles)} persisted job titles: {titles}")
+
+        # CANCELLATION CHECK
+        if await check_cancellation(user_id, resume_filename): raise asyncio.CancelledError()
+
+        # 4. Parallel Fan-Out Research (one researcher per title)
+        import math
+        budget_per_title = math.ceil(limit / len(titles))
         
+        await log(f"Searching for {limit} jobs across {len(titles)} titles (parallel)...")
+        print(f"🔎 Fan-Out: {len(titles)} titles × {budget_per_title} leads each")
+
         # Define Callback
         async def cancel_check_cb():
             return await check_cancellation(user_id, resume_filename)
-             
-        # We use the DYNAMIC profile_blob here
-        leads = await researcher.gather_leads(profile_blob, limit=limit, job_title=job_title, location=location, should_stop_callback=cancel_check_cb, log_callback=log)
+
+        async def search_for_title(title: str, title_budget: int):
+            """Runs a single researcher instance for one job title."""
+            try:
+                researcher = GoogleResearcherAgent(api_key=api_key)
+                title_leads = await researcher.gather_leads(
+                    profile_blob,
+                    limit=title_budget,
+                    job_title=title,
+                    location=location,
+                    should_stop_callback=cancel_check_cb,
+                    log_callback=log
+                )
+                print(f"   ✅ '{title}' → {len(title_leads)} leads")
+                return title_leads
+            except Exception as title_err:
+                print(f"   ❌ '{title}' failed: {title_err}")
+                return []
+
+        # Launch all researchers in parallel
+        tasks = [search_for_title(t, budget_per_title) for t in titles]
+        all_results = await asyncio.gather(*tasks)
+
+        # Fan-In: Merge + Dedupe by URL
+        seen_urls = set()
+        leads = []
+        for result_batch in all_results:
+            for lead in result_batch:
+                url = lead.get('url', '').lower()
+                if url and url not in seen_urls:
+                    seen_urls.add(url)
+                    leads.append(lead)
 
         # Prefix query_source for UI identification
         prefix = "GOOGLE"
         for lead in leads:
             lead['query_source'] = f"{prefix}|{lead.get('query_source', 'Unknown')}"
 
+        print(f"🔀 Fan-In: {len(leads)} unique leads merged from {len(titles)} titles")
+
         # CANCELLATION CHECK
         if await check_cancellation(user_id, resume_filename): raise asyncio.CancelledError()
 
-        # 4. Match
-        await log(f"Found {len(leads)} raw leads. analyzing matches with Matcher Agent...")
+        # 5. Match
+        await log(f"Found {len(leads)} raw leads. Analyzing matches with Matcher Agent...")
         matcher = MatcherAgent(api_key=api_key)
-        # Fix: Use the requested limit, not hardcoded 10
         scored_matches = await matcher.filter_and_score_leads(leads, profile_blob, limit=limit)
 
-        # 5. Save Results
+        # 6. Save Results
         # Save to Storage as JSON (Legacy Backup) & DB
         results_filename = f"matches_{resume_filename}.json"
 
